@@ -108,3 +108,39 @@ def subjects_with_tasks(registry: pd.DataFrame, tasks: Sequence[str]) -> list[st
     subjects = [sub for sub, have in grouped.items() if needed.issubset(have)]
     subjects.sort()
     return subjects
+
+
+def available_tasks(registry: pd.DataFrame, subject: str) -> list[str]:
+    """
+    List tasks available for a subject.
+
+    Parameters
+    ----------
+    registry
+        Registry table.
+    subject
+        Subject label (e.g., "sub-001").
+
+    Returns
+    -------
+    tasks
+        Sorted unique task labels available for the subject.
+
+    Usage example
+    ------------
+        import pandas as pd
+        from dcap.registry.queries import available_tasks
+
+        registry = pd.DataFrame(
+            [
+                {"subject": "sub-001", "task": "conversation"},
+                {"subject": "sub-001", "task": "rest"},
+                {"subject": "sub-002", "task": "conversation"},
+            ]
+        )
+        tasks = available_tasks(registry, "sub-001")
+        assert tasks == ["conversation", "rest"]
+    """
+    df = registry[registry["subject"] == subject]
+    tasks = sorted(set(df["task"].dropna().astype(str)))
+    return tasks

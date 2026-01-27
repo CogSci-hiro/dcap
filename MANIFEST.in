@@ -1,0 +1,2 @@
+recursive-include src/dcap/registry/templates *.md *.csv
+recursive-include src/dcap/registry/schema *.md

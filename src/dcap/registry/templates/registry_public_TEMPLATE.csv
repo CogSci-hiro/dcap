@@ -1,0 +1,2 @@
+subject,session,task,run,bids_root,qc_status,exclude_reason,dataset,notes_public
+sub-001,ses-01,conversation,1,/path/to/bids_root,unknown,,conversation_bids,

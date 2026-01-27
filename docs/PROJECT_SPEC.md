@@ -299,3 +299,13 @@ All derived data must be traceable.
 - Multiple projects can coexist without forking logic
 
 ---
+
+## 12. Registry templates
+
+`dcap` ships CSV templates for public and private registries.
+
+- `dcap registry init-templates --public-out <path> --private-out <path>`
+
+Templates live in `src/dcap/registry/templates/`.
+
+- `dcap registry make-public --private <path> --out <path> --bids-root <bids_root> [--subject-map <path>]`

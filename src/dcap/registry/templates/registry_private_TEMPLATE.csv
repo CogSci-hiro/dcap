@@ -1,0 +1,2 @@
+subject,session,task,run,subject_key,recording_site,acquisition_notes,clinician_notes,qc_reviewer,qc_timestamp,include_override
+sub-001,ses-01,conversation,1,HOSPITAL_ID_OR_KEY,SITE_A,SENSITIVE: free text,SENSITIVE: free text,AB,2026-01-27T00:00:00+01:00,False

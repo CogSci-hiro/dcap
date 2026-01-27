@@ -28,3 +28,53 @@ def test_subjects_with_tasks_returns_subjects_having_all_tasks() -> None:
 
     subjects = subjects_with_tasks(registry, ["conversation", "rest"])
     assert subjects == ["sub-001"]
+
+from dcap.registry.loader import validate_public_registry, validate_private_registry
+
+
+def test_validate_public_registry_accepts_minimal_table() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "conversation",
+                "run": 1,
+                "bids_root": "/data/bids/conversation",
+                "qc_status": "pass",
+            }
+        ]
+    )
+    report = validate_public_registry(df)
+    assert report.ok
+
+
+def test_validate_public_registry_rejects_duplicates() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "conversation",
+                "run": 1,
+                "bids_root": "/data/bids/conversation",
+                "qc_status": "pass",
+            },
+            {
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "conversation",
+                "run": 1,
+                "bids_root": "/data/bids/conversation",
+                "qc_status": "pass",
+            },
+        ]
+    )
+    report = validate_public_registry(df)
+    assert not report.ok
+
+
+def test_validate_private_registry_requires_join_keys() -> None:
+    df = pd.DataFrame([{"subject": "sub-001"}])
+    report = validate_private_registry(df)
+    assert not report.ok
