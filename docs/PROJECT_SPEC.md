@@ -14,7 +14,7 @@ The package is designed to:
 - Enable **reproducible, multi-project reuse** across independent scientific questions
 - Enforce **strict separation between shareable code and sensitive metadata**
 
-`dcap` is **not** a paper-specific analysis repository.  
+`dcap` is **not** a paper-specific analysis repository.
 Scientific interpretation, hypothesis-specific decisions, and figure generation
 belong in downstream project repositories that *depend on* `dcap`.
 
@@ -69,10 +69,10 @@ acquisition quirks) **must not be committed to GitHub or shared publicly**.
 - Code, schemas, validators
 
 **Location**
-
+```
 dcap/
 └── src/dcap/registry/schema/
-
+```
 
 #### Layer 2 — Private Local Metadata (never committed)
 - Subject re-identification keys
@@ -81,13 +81,12 @@ dcap/
 - Internal QC decisions
 
 **Location (example, user-defined)**
-
-
+```
 ~/.dcap_private/
 ├── registry_private.parquet
 ├── subject_keys.yaml
 └── notes/
-
+```
 
 This path is:
 - User-configurable via environment variable (`DCAP_PRIVATE_ROOT`)
@@ -204,37 +203,36 @@ Examples:
 
 ## 7. Repository Structure (Proposed)
 
-
 ```
 dcap/
 ├── src/dcap/
-│ ├── bids/
-│ │ ├── conversation.py
-│ │ ├── rest.py
-│ │ └── ...
-│ ├── qc/
-│ ├── registry/
-│ │ ├── schema/
-│ │ ├── loader.py
-│ │ └── queries.py
-│ ├── preproc/
-│ ├── viz/
-│ ├── analysis/
-│ ├── cli/
-│ └── utils/
+│   ├── bids/
+│   │   ├── conversation.py
+│   │   ├── rest.py
+│   │   └── ...
+│   ├── qc/
+│   ├── registry/
+│   │   ├── schema/
+│   │   ├── loader.py
+│   │   └── queries.py
+│   ├── preproc/
+│   ├── viz/
+│   ├── analysis/
+│   ├── cli/
+│   └── utils/
 │
 ├── docs/
-│ └── PROJECT_SPEC.md
+│   └── PROJECT_SPEC.md
 │
 ├── tests/
-│ ├── test_bids.py
-│ ├── test_registry.py
-│ └── ...
+│   ├── test_bids.py
+│   ├── test_registry.py
+│   └── ...
 │
 ├── pyproject.toml
 ├── .gitignore
-└── README.md (written later)
-
+└── README.md  (written later)
+```
 
 ---
 
@@ -252,7 +250,6 @@ They **must not**:
 - Reimplement BIDS logic
 - Store sensitive metadata
 - Duplicate preprocessing code
-```
 
 ---
 
