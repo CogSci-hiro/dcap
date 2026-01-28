@@ -9,6 +9,7 @@ description = "Reusable tooling for clinically acquired sEEG datasets: BIDS, QC,
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "mat73",
   "mne>=1.6",
   "mne-bids>=0.15",
   "numpy>=1.24",
