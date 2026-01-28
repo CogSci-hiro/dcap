@@ -1,6 +1,6 @@
 import pytest
 
-from dcap.bids.datasets.conversation import convert_conversation_to_bids
+from dcap.bids.tasks.diapix import convert_conversation_to_bids
 
 
 def test_convert_conversation_to_bids_is_stub() -> None:

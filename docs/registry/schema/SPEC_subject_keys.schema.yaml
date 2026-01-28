@@ -7,7 +7,7 @@ privacy: highly_sensitive
 
 required_top_level_keys:
   - version
-  - datasets
+  - tasks
 
 optional_top_level_keys:
   - notes
