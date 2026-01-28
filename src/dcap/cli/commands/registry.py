@@ -113,6 +113,38 @@ def _add_registry_validate(subparsers) -> None:  # noqa: ANN001
     )
 
 
+def _add_view_subcommand(subparsers: Any) -> None:
+    p = subparsers.add_parser("view", help="Build registry view (public + optional private overlays)")
+    p.add_argument("--public-registry", dest="public_registry", type=Path, required=True)
+    p.add_argument(
+        "--private-root",
+        type=str,
+        default="env",
+        help="Private root: 'env' (DCAP_PRIVATE_ROOT), 'none' (skip), or an explicit path",
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Optional output TSV path for the full view (local-only; may contain private fields)",
+    )
+    p.add_argument("--summary-only", action="store_true", help="Only print summary counts")
+    p.set_defaults(registry_cmd="view")
+
+
+def _add_export_availability_subcommand(subparsers: Any) -> None:
+    p = subparsers.add_parser("export-availability", help="Export sanitized availability indices (shareable)")
+    p.add_argument("--public-registry", dest="public_registry", type=Path, required=True)
+    p.add_argument(
+        "--private-root",
+        type=str,
+        default="env",
+        help="Private root: 'env' (DCAP_PRIVATE_ROOT), 'none' (skip), or an explicit path",
+    )
+    p.add_argument("--out", type=Path, required=True, help="Output TSV path (sanitized)")
+    p.set_defaults(registry_cmd="export-availability")
+
+
 # =============================================================================
 # Execution
 # =============================================================================
