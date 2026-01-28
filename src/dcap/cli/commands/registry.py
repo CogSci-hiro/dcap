@@ -270,7 +270,6 @@ def _run_build_public(args: argparse.Namespace) -> int:
         public_registry_out=args.out,
         private_root=args.private_root,
         dataset_id=args.dataset_id,
-        strict=args.strict,
     )
 
     if args.validate:
