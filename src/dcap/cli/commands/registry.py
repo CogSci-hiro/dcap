@@ -15,8 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from dcap.registry.validate import resolve_private_root, validate_registry
 from dcap.registry.build import build_public_registry
+from dcap.registry.validate import resolve_private_root, validate_registry
+from dcap.registry.view import build_registry_view, write_registry_view_tsv
+from dcap.registry.products import write_availability_index_by_task
 
 
 # =============================================================================
