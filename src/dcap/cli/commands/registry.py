@@ -10,10 +10,6 @@
 # REVIEW
 # =============================================================================
 
-from __future__ import annotations  # remove if you prefer; see note below
-# NOTE: You said you prefer not using __future__ imports going forward.
-# If you're on Python 3.11+, you can delete this line safely.
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional

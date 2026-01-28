@@ -20,7 +20,8 @@ from typing import Dict, Sequence
 
 from dcap.cli.types import CliCommand
 
-from dcap.cli.commands import bids_convert as cmd_bids_convert
+# from dcap.cli.commands import bids_convert as cmd_bids_convert
+from dcap.cli.commands import registry as cmd_registry
 
 
 # =============================================================================
@@ -28,7 +29,8 @@ from dcap.cli.commands import bids_convert as cmd_bids_convert
 # =============================================================================
 
 _COMMANDS: Dict[str, CliCommand] = {
-    "bids-convert": cmd_bids_convert,
+    # "bids-convert": cmd_bids_convert,
+    "registry": cmd_registry,
 }
 
 
@@ -48,10 +50,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     Usage example
     -------------
         dcap bids-convert --help
+        dcap registry validate --help
     """
     parser = argparse.ArgumentParser(
         prog="dcap",
-        description="DCAP: clinical conversational electrophysiology pipeline",
+        description="DCAP: sEEG data selection",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
@@ -83,14 +86,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     Usage example
     -------------
-        main([
-            "bids-convert",
-            "--source-root", "sourcedata/Nic-Ele",
-            "--bids-root", "bids",
-            "--subject", "NicEle",
-            "--task", "diapix",
-            "--datatype", "ieeg",
-        ])
+        main(["registry", "validate", "--public-registry", "registry_public.tsv"])
     """
     parser = build_arg_parser()
     args = parser.parse_args(argv)

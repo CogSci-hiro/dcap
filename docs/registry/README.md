@@ -281,3 +281,8 @@ flowchart TB
 - **Sanitization is mandatory for sharing**
 
 This separation allows `dcap` to support real clinical workflows without compromising privacy or reproducibility.
+
+TODO:
+```bash
+export DCAP_PRIVATE_ROOT="/path/to/private/directory"
+```
