@@ -1,278 +1,147 @@
-"""
-Registry loaders and validators.
-
-Public layer:
-- shareable, version-controlled indices
-
-Private layer:
-- local-only metadata referenced via DCAP_PRIVATE_ROOT
-
-Important
----------
-Private metadata must NEVER overwrite public columns. The merge is a left join
-from public -> private, using JOIN_KEYS.
-
-"""
+# src/dcap/registry/loader.py
+# =============================================================================
+#                      Registry loader: public + private
+# =============================================================================
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
-from dcap.config import get_private_root
-from dcap.registry.schema import (
-    JOIN_KEYS,
-    PRIVATE_REQUIRED_COLUMNS,
-    PUBLIC_REQUIRED_COLUMNS,
-    QC_STATUS_ALLOWED,
-    SchemaValidationReport,
-)
+from dcap.registry.schema.private import PrivateRegistrySchema
+from dcap.registry.schema.public import PublicRegistrySchema
 
 
 @dataclass(frozen=True, slots=True)
-class RegistrySources:
+class RegistryPaths:
     """
-    Locations of registry source files.
-
-    Parameters
-    ----------
-    public_registry_path
-        Path to the public/shareable registry index file.
-    private_registry_path
-        Path to the private registry file, if available.
+    Standard filenames under a DCAP private root.
 
     Usage example
-    ------------
-        from pathlib import Path
-        from dcap.registry.loader import RegistrySources
-
-        sources = RegistrySources(
-            public_registry_path=Path("registry_public.parquet"),
-            private_registry_path=None,
-        )
+    -------------
+        paths = RegistryPaths()
+        private_registry_path = paths.private_registry_path(Path("~/.dcap_private").expanduser())
     """
-    public_registry_path: Path
-    private_registry_path: Optional[Path]
+
+    private_registry_filename: str = "registry_private.parquet"
+
+    def private_registry_path(self, private_root: Path) -> Path:
+        """
+        Compute private registry path under a private root.
+
+        Usage example
+        -------------
+            paths = RegistryPaths()
+            p = paths.private_registry_path(Path("~/.dcap_private").expanduser())
+        """
+        return private_root / self.private_registry_filename
 
 
-def resolve_registry_sources(
-    public_registry_path: Path,
-    *,
-    private_filename: str = "registry_private.parquet",
-) -> RegistrySources:
+def load_public_registry(path: Path) -> pd.DataFrame:
     """
-    Resolve public and private registry sources.
-
-    Parameters
-    ----------
-    public_registry_path
-        Path to the public registry file (shareable).
-    private_filename
-        Expected filename under DCAP_PRIVATE_ROOT.
-
-    Returns
-    -------
-    sources
-        Resolved registry sources.
-
-    Usage example
-    ------------
-        from pathlib import Path
-        from dcap.registry.loader import resolve_registry_sources
-
-        sources = resolve_registry_sources(Path("registry_public.parquet"))
-    """
-    private_root = get_private_root()
-    private_path = None
-    if private_root is not None:
-        candidate = (private_root / private_filename).resolve()
-        if candidate.exists():
-            private_path = candidate
-
-    return RegistrySources(public_registry_path=public_registry_path, private_registry_path=private_path)
-
-
-def _read_table(path: Path) -> pd.DataFrame:
-    """
-    Read a registry table from CSV or Parquet.
+    Load the public registry.
 
     Parameters
     ----------
     path
-        File path.
+        Path to a CSV or Parquet file.
 
     Returns
     -------
-    table
-        Loaded table.
+    pandas.DataFrame
+        Public registry DataFrame.
+
+    Example format
+    --------------
+    | dataset_id | bids_root      | subject  | session | task         | run | datatype | record_id                             |
+    |-----------:|----------------|----------|---------|--------------|-----|----------|--------------------------------------|
+    | siteA_2024 | /data/bidsA    | sub-001  | ses-01  | conversation | 1   | ieeg     | siteA_2024|sub-001|ses-01|...|ieeg |
 
     Usage example
-    ------------
-        from pathlib import Path
-        from dcap.registry.loader import _read_table
-
-        df = _read_table(Path("registry_public.csv"))
+    -------------
+        df_public = load_public_registry(Path("registry_public.parquet"))
     """
+    if not path.exists():
+        raise FileNotFoundError(f"Public registry not found: {path}")
+
     if path.suffix.lower() == ".parquet":
-        return pd.read_parquet(path)
-    return pd.read_csv(path)
+        df = pd.read_parquet(path)
+    elif path.suffix.lower() == ".csv":
+        df = pd.read_csv(path)
+    else:
+        raise ValueError(f"Unsupported public registry extension: {path.suffix}")
+
+    PublicRegistrySchema().validate(df)
+    return df
 
 
-def validate_public_registry(public_df: pd.DataFrame) -> SchemaValidationReport:
+def resolve_private_root(private_root: Optional[str | Path]) -> Optional[Path]:
     """
-    Validate the public registry schema.
+    Resolve private root path.
 
     Parameters
     ----------
-    public_df
-        Public registry table.
+    private_root
+        - None: no private overlay
+        - "env": read from DCAP_PRIVATE_ROOT
+        - path-like: explicit path
 
     Returns
     -------
-    report
-        Validation report.
-
-    Notes
-    -----
-    Expected DataFrame format (example):
-
-    | subject | session | task | run | bids_root | qc_status |
-    |---|---|---|---:|---|---|
-    | sub-001 | ses-01 | conversation | 1 | /data/bids/conversation | pass |
+    pathlib.Path | None
+        Resolved private root, or None.
 
     Usage example
-    ------------
-        import pandas as pd
-        from dcap.registry.loader import validate_public_registry
-
-        df = pd.DataFrame(
-            [{"subject": "sub-001", "session": "ses-01", "task": "conversation", "run": 1,
-              "bids_root": "/data/bids", "qc_status": "pass"}]
-        )
-        report = validate_public_registry(df)
-        assert report.ok
+    -------------
+        root = resolve_private_root("env")
     """
-    errors: list[str] = []
-
-    missing = [c for c in PUBLIC_REQUIRED_COLUMNS if c not in public_df.columns]
-    if missing:
-        errors.append(f"Public registry missing required columns: {missing}")
-
-    if not errors:
-        dup_mask = public_df.duplicated(list(JOIN_KEYS), keep=False)
-        if bool(dup_mask.any()):
-            dups = public_df.loc[dup_mask, list(JOIN_KEYS)].drop_duplicates().to_dict("records")
-            errors.append(f"Public registry contains duplicate JOIN_KEYS rows: {dups[:10]}")
-
-        if "qc_status" in public_df.columns:
-            bad = sorted(set(public_df["qc_status"].dropna().astype(str)) - set(QC_STATUS_ALLOWED))
-            if bad:
-                errors.append(f"Public registry has invalid qc_status values: {bad}. Allowed={list(QC_STATUS_ALLOWED)}")
-
-    return SchemaValidationReport(ok=(len(errors) == 0), errors=errors)
+    if private_root is None:
+        return None
+    if isinstance(private_root, str) and private_root.lower() == "env":
+        env_val = os.environ.get("DCAP_PRIVATE_ROOT", "").strip()
+        if not env_val:
+            return None
+        return Path(env_val).expanduser().resolve()
+    return Path(private_root).expanduser().resolve()
 
 
-def validate_private_registry(private_df: pd.DataFrame) -> SchemaValidationReport:
+def load_private_registry(private_root: Optional[str | Path]) -> pd.DataFrame:
     """
-    Validate the private registry schema (only structural checks).
+    Load the private registry overlay.
+
+    If private_root is None or missing/unset, returns an empty DataFrame.
 
     Parameters
     ----------
-    private_df
-        Private registry table.
+    private_root
+        See resolve_private_root.
 
     Returns
     -------
-    report
-        Validation report.
+    pandas.DataFrame
+        Private registry overlay (possibly empty).
+
+    Example format
+    --------------
+    | record_id                             | qc_status | exclude | exclude_reason | notes            |
+    |--------------------------------------|----------:|--------:|----------------|------------------|
+    | siteA_2024|sub-001|ses-01|...|ieeg    | pass      | False   |                | "noisy but ok"   |
 
     Usage example
-    ------------
-        import pandas as pd
-        from dcap.registry.loader import validate_private_registry
-
-        df = pd.DataFrame(
-            [{"subject": "sub-001", "session": "ses-01", "task": "conversation", "run": 1,
-              "subject_key": "HOSP123"}]
-        )
-        report = validate_private_registry(df)
-        assert report.ok
+    -------------
+        df_private = load_private_registry("env")
     """
-    errors: list[str] = []
+    root = resolve_private_root(private_root)
+    if root is None:
+        return pd.DataFrame({"record_id": pd.Series(dtype="string")})
 
-    missing = [c for c in PRIVATE_REQUIRED_COLUMNS if c not in private_df.columns]
-    if missing:
-        errors.append(f"Private registry missing required columns: {missing}")
+    paths = RegistryPaths()
+    reg_path = paths.private_registry_path(root)
+    if not reg_path.exists():
+        # Empty overlay is acceptable; user might not have started QC yet.
+        return pd.DataFrame({"record_id": pd.Series(dtype="string")})
 
-    if not errors:
-        dup_mask = private_df.duplicated(list(JOIN_KEYS), keep=False)
-        if bool(dup_mask.any()):
-            dups = private_df.loc[dup_mask, list(JOIN_KEYS)].drop_duplicates().to_dict("records")
-            errors.append(f"Private registry contains duplicate JOIN_KEYS rows: {dups[:10]}")
-
-    return SchemaValidationReport(ok=(len(errors) == 0), errors=errors)
-
-
-def load_registry_table(
-    sources: RegistrySources,
-    *,
-    private_prefix: str = "private__",
-    validate: bool = True,
-) -> pd.DataFrame:
-    """
-    Load and safely merge public + (optional) private registry tables.
-
-    Parameters
-    ----------
-    sources
-        Locations of public and private registry sources.
-    private_prefix
-        Prefix applied to all private-only columns during merge.
-    validate
-        If True, run schema validations and raise ValueError on failure.
-
-    Returns
-    -------
-    registry
-        Merged registry table.
-
-    Notes
-    -----
-    Merge rules:
-    - left join from public -> private on JOIN_KEYS
-    - private columns never overwrite public columns
-    - private-only columns are prefixed
-
-    Usage example
-    ------------
-        from pathlib import Path
-        from dcap.registry.loader import resolve_registry_sources, load_registry_table
-
-        sources = resolve_registry_sources(Path("registry_public.parquet"))
-        registry = load_registry_table(sources, private_prefix="private__")
-        print(registry.columns)
-    """
-    public_df = _read_table(sources.public_registry_path)
-
-    if validate:
-        report = validate_public_registry(public_df)
-        if not report.ok:
-            raise ValueError("Invalid public registry:\n" + "\n".join(report.errors))
-
-    if sources.private_registry_path is None:
-        return public_df.reset_index(drop=True)
-
-    private_df = _read_table(sources.private_registry_path)
-
-    if validate:
-        report = validate_private_registry(private_df)
-        if not report.ok:
-            raise ValueError("Invalid private registry:\n" + "\n".join(report.errors))
-
-    # Determine private-only columns and prefix them
-    private_only_cols = [c for c in private_df.columns if c not in public_df.columns and c not in JOIN_KEYS]
-    private_renamed = private_df[list(JOIN_KEYS) + private_only_cols].copy()
-    private_renamed = private_renamed.rename(columns={c: f"{private_prefix}{c}" for c in private_only_cols})
-
-    merged = public_df.merge(private_renamed, how="left", on=list(JOIN_KEYS), validate="one_to_one")
-    return merged.reset_index(drop=True)
+    df = pd.read_parquet(reg_path)
+    PrivateRegistrySchema().validate(df)
+    return df
