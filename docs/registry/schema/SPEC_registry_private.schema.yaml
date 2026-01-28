@@ -1,5 +1,5 @@
 # Machine-readable specification for registry_private.tsv
-# Used for validation only. Does NOT contain data.
+# Used for common only. Does NOT contain data.
 
 version: 1
 type: table

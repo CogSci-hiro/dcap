@@ -1,78 +1,89 @@
 # =============================================================================
-#                           DCAP: Source I/O loaders
+#                            BIDS: Source I/O
 # =============================================================================
-# > Convert a SourceItem into an MNE Raw.
-# > Keep this narrow: loading only. No fancy preprocessing.
 
+import codecs
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Tuple
 
 import mne
+import numpy as np
+from scipy.io import wavfile
 
-from dcap_bids.heuristics import SourceItem
-from dcap_bids.logging import get_logger
-
-LOGGER = get_logger(__name__)
+from dcap.bids.heuristics import SourceItem
 
 
-def load_source_raw(item: SourceItem) -> mne.io.BaseRaw:
+def fix_brainvision_header_utf8(vhdr_path: Path) -> None:
     """
-    Load a SourceItem into an MNE Raw object.
+    Fix common BrainVision header encoding issues (µ -> u) in-place.
+
+    Parameters
+    ----------
+    vhdr_path
+        Path to the .vhdr file.
+
+    Usage example
+    -------------
+        fix_brainvision_header_utf8(Path("conversation_1.vhdr"))
+    """
+    with codecs.open(vhdr_path, "rb") as f:
+        data = f.read()
+
+    # BrainVision sometimes uses byte 0xB5 (µ) which breaks UTF-8 parsing in some contexts.
+    fixed = data.replace(b"\xb5", b"u")
+
+    if fixed != data:
+        with open(vhdr_path, "wb") as f:
+            f.write(fixed)
+
+
+def load_raw_brainvision(item: SourceItem, preload: bool) -> mne.io.BaseRaw:
+    """
+    Load BrainVision raw for a SourceItem.
 
     Parameters
     ----------
     item
-        Discovered source item.
+        The SourceItem containing the .vhdr path.
+    preload
+        Whether to preload data into memory.
 
     Returns
     -------
     mne.io.BaseRaw
-        Loaded raw recording.
+        Loaded raw data.
 
     Usage example
-        raw = load_source_raw(item)
+    -------------
+        raw = load_raw_brainvision(item, preload=True)
     """
-    loaders: Dict[str, Callable[[Path], mne.io.BaseRaw]] = {
-        "edf": _load_edf,
-        "brainvision": _load_brainvision,
-        "fif": _load_fif,
-    }
+    if item.raw_vhdr is None:
+        raise ValueError("SourceItem has no raw_vhdr; cannot load BrainVision raw.")
 
-    if item.kind not in loaders:
-        raise ValueError(f"Unsupported source kind: {item.kind}")
-
-    raw = loaders[item.kind](item.source_path)
+    fix_brainvision_header_utf8(item.raw_vhdr)
+    raw = mne.io.read_raw_brainvision(item.raw_vhdr, preload=preload, verbose=False)
     return raw
 
 
-def _load_edf(path: Path) -> mne.io.BaseRaw:
+def load_wav(path: Path) -> Tuple[int, np.ndarray]:
     """
-    Load EDF using MNE.
+    Load WAV audio via scipy.
+
+    Parameters
+    ----------
+    path
+        Path to a .wav file.
+
+    Returns
+    -------
+    sr : int
+        Sampling rate.
+    wav : np.ndarray
+        Audio array (shape [n_samples, n_channels] or [n_samples]).
 
     Usage example
-        raw = _load_edf(Path("recording.edf"))
+    -------------
+        sr, wav = load_wav(Path("conversation_1.wav"))
     """
-    LOGGER.debug("Loading EDF: %s", path)
-    return mne.io.read_raw_edf(path, preload=False, verbose=False)
-
-
-def _load_brainvision(path: Path) -> mne.io.BaseRaw:
-    """
-    Load BrainVision using MNE.
-
-    Usage example
-        raw = _load_brainvision(Path("recording.vhdr"))
-    """
-    LOGGER.debug("Loading BrainVision: %s", path)
-    return mne.io.read_raw_brainvision(path, preload=False, verbose=False)
-
-
-def _load_fif(path: Path) -> mne.io.BaseRaw:
-    """
-    Load FIF using MNE.
-
-    Usage example
-        raw = _load_fif(Path("recording_raw.fif"))
-    """
-    LOGGER.debug("Loading FIF: %s", path)
-    return mne.io.read_raw_fif(path, preload=False, verbose=False)
+    sr, wav = wavfile.read(path)
+    return int(sr), wav

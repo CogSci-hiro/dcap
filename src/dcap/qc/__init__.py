@@ -1,3 +1,3 @@
 """
-Quality control and validation utilities.
+Quality control and common utilities.
 """

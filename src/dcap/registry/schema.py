@@ -50,12 +50,12 @@ PRIVATE_REQUIRED_COLUMNS: Final[tuple[str, ...]] = JOIN_KEYS
 @dataclass(frozen=True, slots=True)
 class SchemaValidationReport:
     """
-    Summary of registry schema validation.
+    Summary of registry schema common.
 
     Parameters
     ----------
     ok
-        Whether validation succeeded.
+        Whether common succeeded.
     errors
         List of human-readable error messages.
 

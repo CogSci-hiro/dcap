@@ -8,3 +8,16 @@ private identifiers to operate; mapping keys should be resolved via the
 registry layer at runtime.
 
 """
+
+# =============================================================================
+#                                DCAP: BIDS
+# =============================================================================
+
+from dcap.bids.config import BidsConvertConfig, DiapixTimingConfig
+from dcap.bids.converter import convert_subject_to_bids
+
+__all__ = [
+    "BidsConvertConfig",
+    "DiapixTimingConfig",
+    "convert_subject_to_bids",
+]

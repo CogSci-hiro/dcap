@@ -1,90 +1,105 @@
 # =============================================================================
-#                         DCAP: Source discovery heuristics
+#                         BIDS: Discovery heuristics
 # =============================================================================
-# > Put dataset-specific “how do I find files?” logic here.
-# > Keep it deterministic and testable.
+#
+# - Find source recordings (per run)
+# - Parse run numbers and pair associated audio/video if present
+# - Keep this deterministic and testable
+#
+# REVIEW
+# =============================================================================
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from dcap_bids.logging import get_logger
-
-LOGGER = get_logger(__name__)
+import re
 
 
 @dataclass(frozen=True)
 class SourceItem:
     """
-    A single source recording to convert.
+    A single source recording unit to convert (typically one run).
 
     Parameters
     ----------
-    source_path
-        Path to the raw source file or folder.
-    kind
-        A short string describing the source type (e.g. 'edf', 'brainvision', 'nlx', 'mic').
-        This is used to route to the appropriate loader.
-    subject_hint
-        Optional subject identifier extracted from the filename/folder.
-    session_hint
-        Optional session identifier extracted from the filename/folder.
-    run_hint
-        Optional run identifier extracted from the filename/folder.
+    run
+        Run label (string, e.g. "1" or "01").
+    raw_vhdr
+        Path to the BrainVision header file for the run, if present.
+    audio_wav
+        Path to the run's WAV file, if present.
+    video_asf
+        Path to the run's ASF file, if present.
 
     Usage example
+    -------------
         item = SourceItem(
-            source_path=Path("/data/subj001/run1.edf"),
-            kind="edf",
-            subject_hint="001",
-            session_hint="01",
-            run_hint="01",
+            run="1",
+            raw_vhdr=Path("conversation_1.vhdr"),
+            audio_wav=Path("conversation_1.wav"),
+            video_asf=None,
         )
     """
 
-    source_path: Path
-    kind: str
-    subject_hint: Optional[str]
-    session_hint: Optional[str]
-    run_hint: Optional[str]
+    run: str
+    raw_vhdr: Optional[Path]
+    audio_wav: Optional[Path]
+    video_asf: Optional[Path]
+
+
+_RUN_RE = re.compile(r"^conversation_(?P<run>\d+)\.(?P<ext>vhdr|wav|asf)$")
 
 
 def discover_source_items(source_root: Path) -> Iterable[SourceItem]:
     """
-    Discover source items under a source root.
+    Discover runs under a subject source directory.
 
-    This is deliberately simplistic: it searches for known file extensions.
-    Replace/extend with your clinical acquisition conventions.
+    Notes
+    -----
+    This assumes a flat structure like:
+      conversation_<RUN>.vhdr
+      conversation_<RUN>.wav
+      conversation_<RUN>.asf
 
     Parameters
     ----------
     source_root
-        Root directory to scan.
+        Directory containing source files for one subject.
 
     Yields
     ------
     SourceItem
-        Discovered items.
+        One item per run, with optional paired audio/video.
 
     Usage example
-        items = list(discover_source_items(Path("./source")))
+    -------------
+        items = list(discover_source_items(Path("sourcedata/Nic-Ele")))
     """
     if not source_root.exists():
         raise FileNotFoundError(f"source_root does not exist: {source_root}")
 
-    # Extend as needed: .vhdr (BrainVision), .edf, .set (EEGLAB), etc.
-    patterns = [
-        ("edf", "**/*.edf"),
-        ("brainvision", "**/*.vhdr"),
-        ("fif", "**/*.fif"),
-    ]
+    runs: dict[str, dict[str, Path]] = {}
 
-    for kind, glob_pattern in patterns:
-        for path in sorted(source_root.glob(glob_pattern)):
-            yield SourceItem(
-                source_path=path,
-                kind=kind,
-                subject_hint=None,
-                session_hint=None,
-                run_hint=None,
-            )
+    for path in sorted(source_root.iterdir()):
+        if not path.is_file():
+            continue
+
+        match = _RUN_RE.match(path.name)
+        if match is None:
+            continue
+
+        run = match.group("run")
+        ext = match.group("ext")
+
+        if run not in runs:
+            runs[run] = {}
+        runs[run][ext] = path
+
+    for run, files in sorted(runs.items(), key=lambda x: int(x[0])):
+        yield SourceItem(
+            run=run,
+            raw_vhdr=files.get("vhdr"),
+            audio_wav=files.get("wav"),
+            video_asf=files.get("asf"),
+        )

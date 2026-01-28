@@ -1,5 +1,5 @@
 """
-BIDS and signal-level validation (placeholder).
+BIDS and signal-level common (placeholder).
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +9,7 @@ from typing import Optional
 @dataclass(frozen=True, slots=True)
 class QcResult:
     """
-    Result of a QC/validation run.
+    Result of a QC/common run.
 
     Parameters
     ----------
@@ -35,7 +35,7 @@ class QcResult:
 
 def run_qc(bids_root: Path) -> QcResult:
     """
-    Run dataset QC/validation (skeleton).
+    Run dataset QC/common (skeleton).
 
     Parameters
     ----------

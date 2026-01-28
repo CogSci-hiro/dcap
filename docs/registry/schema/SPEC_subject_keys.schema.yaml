@@ -1,5 +1,5 @@
 # Machine-readable specification for subject_keys.yaml
-# Used for validation only. Does NOT contain data.
+# Used for common only. Does NOT contain data.
 
 version: 1
 type: yaml_mapping
