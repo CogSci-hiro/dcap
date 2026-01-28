@@ -1,53 +1,39 @@
-"""
-BIDS conversion for conversational recordings (placeholder).
-"""
-from pathlib import Path
-from typing import Optional
+from dcap.bids.tasks.base import BidsTask, RecordingUnit, PreparedEvents
+from dcap.bids.core.sync import estimate_delay_seconds
+from dcap.bids.tasks.diapix.audio import crop_and_write_audio
+from dcap.bids.tasks.diapix.events import build_conversation_events
 
 
-def convert_conversation_to_bids(
-    raw_root: Path,
-    bids_root: Path,
-    *,
-    subject: str,
-    session: Optional[str] = None,
-    overwrite: bool = False,
-) -> None:
-    """
-    Convert conversational raw data into a BIDS dataset (skeleton).
+class DiapixTask:
+    name = "diapix"
 
-    Parameters
-    ----------
-    raw_root
-        Root directory of raw conversational data.
-    bids_root
-        Destination BIDS root directory.
-    subject
-        Anonymized BIDS subject label (e.g., "sub-001").
-    session
-        Optional BIDS session label.
-    overwrite
-        If True, allows overwriting existing outputs.
+    def discover(self, source_root: Path) -> list[RecordingUnit]:
+        return discover_diapix_units(source_root)
 
-    Notes
-    -----
-    This function is intentionally a stub. Implementation must:
-    - write BIDS-compliant filenames
-    - produce required sidecars (e.g. channels.tsv)
-    - handle irregular clinical acquisition gracefully
+    def load_raw(self, unit: RecordingUnit, preload: bool) -> mne.io.BaseRaw:
+        raw = load_brainvision(unit.raw_path, preload=preload)
+        apply_channel_policy(raw)
+        apply_montage(raw)
+        return raw
 
-    Usage example
-    ------------
-        from pathlib import Path
-        from dcap.bids.conversation import convert_conversation_to_bids
-
-        convert_conversation_to_bids(
-            raw_root=Path("/data/raw/conversation"),
-            bids_root=Path("/data/bids/conversation_bids"),
-            subject="sub-001",
-            session="ses-01",
-            overwrite=False,
+    def prepare_events(self, raw, unit, bids_path) -> PreparedEvents:
+        triggers = extract_trigger_events(raw, unit)
+        delay_s = estimate_delay_seconds(
+            raw_triggers=triggers,
+            sfreq=raw.info["sfreq"],
+            stim_wav_path=self.stim_wav,
         )
-    """
-    _ = (raw_root, bids_root, subject, session, overwrite)
-    raise NotImplementedError("BIDS conversion not implemented yet.")
+        events, event_id = build_conversation_events(raw, delay_s, self.timing)
+        return PreparedEvents(events=events, event_id=event_id)
+
+    def post_write(self, unit: RecordingUnit, bids_path: BIDSPath) -> None:
+        if unit.audio_path is not None:
+            crop_and_write_audio(
+                src_wav=unit.audio_path,
+                dst_wav=self._audio_out_path(bids_path),
+                onset_s=self._audio_onset(unit),
+                duration_s=self.timing.conversation_duration_s,
+            )
+
+        if unit.video_path is not None:
+            copy_video(unit.video_path, bids_path)

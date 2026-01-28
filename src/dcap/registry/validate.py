@@ -291,7 +291,7 @@ def _validate_subject_keys_yaml(path: Path) -> List[ValidationIssue]:
                 continue
 
             bids_subject = entry.get("bids_subject")
-            local_subject_id = entry.get("local_subject_id")
+            local_subject_id = entry.get("dcap_id")
 
             if not _is_non_empty_str(bids_subject):
                 issues.append(ValidationIssue(level="error", location=f"{loc}.bids_subject", message="missing required field"))
