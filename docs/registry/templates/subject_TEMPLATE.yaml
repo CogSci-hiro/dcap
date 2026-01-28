@@ -25,6 +25,7 @@ identity:
   name: ""                # Private (optional)
   sex: unknown            # male | female | other | unknown
   date_of_birth: ""       # YYYY-MM-DD (private)
+  handedness: ""          # right | left | unknown
 
 # ---------------------------------------------------------------------------
 # 2. Implantation / hardware
