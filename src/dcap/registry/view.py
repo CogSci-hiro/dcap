@@ -1,138 +1,186 @@
-# src/dcap/registry/view.py
+# dcap/registry/view.py
 # =============================================================================
-#                     Registry view: public + private join
+#                         Registry: runtime view
 # =============================================================================
+#
+# Build an in-memory "registry view" by joining:
+# - registry_public.tsv (shareable structural index)
+# - registry_private.tsv (optional, local-only decisions)
+#
+# Join key: record_id
+#
+# =============================================================================
+
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import pandas as pd
+import csv
 
 
-@dataclass(frozen=True, slots=True)
-class RegistryMergePolicy:
-    """
-    Policy controlling how private metadata overlays public manifest.
+# =============================================================================
+# Constants
+# =============================================================================
 
-    Rules
-    -----
-    - Private may not redefine BIDS entities or dataset identity.
-    - Private may add/override annotation fields such as qc_status, exclude, notes.
+PRIVATE_DECISIONS_EXPECTED_COLUMNS: Tuple[str, ...] = (
+    "record_id",
+    "exclude_reason",
+    "review_date",
+    "notes",
+)
 
-    Usage example
-    -------------
-        policy = RegistryMergePolicy()
-        df_view, warnings = build_registry_view(df_public, df_private, policy)
-    """
+VIEW_EXTRA_COLUMNS: Tuple[str, ...] = (
+    "excluded",
+    "exclude_reason",
+    "review_date",
+    "notes",
+)
 
-    protected_columns: tuple[str, ...] = (
-        "dataset_id",
-        "bids_root",
-        "subject",
-        "session",
-        "task",
-        "run",
-        "datatype",
-        "record_id",
-    )
 
-    overlay_columns: tuple[str, ...] = (
-        "qc_status",
-        "exclude",
-        "exclude_reason",
-        "notes",
-        "tags",
-        "reviewer",
-        "review_date",
-        "clock_drift_ms",
-        "bad_channels",
-        "private_doc_ref",
-    )
-
+# =============================================================================
+# Public API
+# =============================================================================
 
 def build_registry_view(
-    df_public: pd.DataFrame,
-    df_private: pd.DataFrame,
-    policy: Optional[RegistryMergePolicy] = None,
-) -> tuple[pd.DataFrame, list[str]]:
+    *,
+    public_registry: Path,
+    private_registry: Optional[Path],
+) -> List[Dict[str, Any]]:
     """
-    Join public registry with optional private overlay and compute derived fields.
+    Build the runtime registry view (public + optional private overlays).
 
     Parameters
     ----------
-    df_public
-        Public manifest DataFrame.
-    df_private
-        Private overlay DataFrame (possibly empty).
-    policy
-        Merge policy controlling allowed overlays.
+    public_registry
+        Path to registry_public.tsv.
+    private_registry
+        Optional path to registry_private.tsv. If None or missing, the view is
+        built from public only (no exclusions / notes).
 
     Returns
     -------
-    df_view : pandas.DataFrame
-        Joined view with derived fields:
-        - effective_qc_status
-        - is_excluded
-        - is_usable
-    warnings : list[str]
-        Human-readable warnings (e.g., orphan private rows).
+    list[dict[str, Any]]
+        List of row dicts. Each row includes all public columns plus:
+        - excluded: bool
+        - exclude_reason: str
+        - review_date: str
+        - notes: str
 
-    View format (example)
+    Notes
+    -----
+    This is an in-memory join on record_id.
+    The resulting view is *not* intended for version control.
+
+    Output format example
     ---------------------
-    | record_id | subject | task | run | qc_status | exclude | effective_qc_status | is_usable |
-    |----------|---------|------|-----|----------:|--------:|---------------------|----------:|
-    | ...      | sub-001 | conv | 1   | pass      | False   | pass                | True      |
+    Registry view rows look like:
+
+    | dataset_id | subject  | session | acquisition_id | protocol_id | task        | sex    | age_years | record_id                                 | excluded | exclude_reason | review_date  |
+    |-----------|----------|---------|----------------|------------|-------------|--------|----------:|-------------------------------------------|---------:|----------------|------------|
+    | Timone2025| sub-001  | ses-01  | acq-01         | prot-01    | conversation| male   | 34        | Timone2025|sub-001|ses-01|acq-01|prot-01 | False    |                |            |
 
     Usage example
     -------------
-        df_view, warnings = build_registry_view(df_public, df_private)
-        usable = df_view[df_view["is_usable"]]
-    """
-    if policy is None:
-        policy = RegistryMergePolicy()
+        from pathlib import Path
+        from dcap.registry.view import build_registry_view
 
-    warnings: list[str] = []
-
-    if "record_id" not in df_public.columns:
-        raise ValueError("df_public must include 'record_id' column.")
-    if "record_id" not in df_private.columns:
-        # allow empty overlay created by loader
-        df_private = pd.DataFrame({"record_id": pd.Series(dtype="string")})
-
-    # Detect forbidden columns in private that collide with protected columns
-    forbidden = [c for c in df_private.columns if c in policy.protected_columns and c != "record_id"]
-    if forbidden:
-        raise ValueError(
-            "Private registry must not define protected columns. "
-            f"Found forbidden columns in private: {forbidden}"
+        rows = build_registry_view(
+            public_registry=Path("registry_public.tsv"),
+            private_registry=Path("/secure/DCAP_PRIVATE_ROOT/registry_private.tsv"),
         )
 
-    # Orphan private rows (record_id not in public)
-    if len(df_private) > 0:
-        public_ids = set(df_public["record_id"].astype(str).tolist())
-        private_ids = set(df_private["record_id"].astype(str).tolist())
-        orphan_ids = sorted(private_ids - public_ids)
-        if orphan_ids:
-            warnings.append(
-                f"Private registry contains {len(orphan_ids)} orphan record_id(s) not present in public manifest. "
-                "They will be ignored by the join."
+        # Optional: convert to pandas if you want
+        # import pandas as pd
+        # df = pd.DataFrame(rows)
+    """
+    public_rows, public_header = _read_tsv(public_registry)
+
+    private_index: Dict[str, Dict[str, str]] = {}
+    if private_registry is not None and private_registry.exists():
+        private_rows, private_header = _read_tsv(private_registry)
+        private_index = _index_private_decisions(private_rows, private_header)
+
+    view_rows: List[Dict[str, Any]] = []
+    for public_row in public_rows:
+        record_id = str(public_row.get("record_id", "")).strip()
+
+        merged: Dict[str, Any] = dict(public_row)
+
+        private = private_index.get(record_id)
+        if private is None:
+            merged.update(
+                {
+                    "excluded": False,
+                    "exclude_reason": "",
+                    "review_date": "",
+                    "notes": "",
+                }
             )
-            df_private = df_private[df_private["record_id"].astype(str).isin(public_ids)].copy()
+        else:
+            exclude_reason = str(private.get("exclude_reason", "")).strip()
+            merged.update(
+                {
+                    "excluded": exclude_reason != "",
+                    "exclude_reason": exclude_reason,
+                    "review_date": str(private.get("review_date", "")).strip(),
+                    "notes": str(private.get("notes", "")).strip(),
+                }
+            )
 
-    # Reduce private to overlay columns (keep record_id)
-    keep_private_cols = ["record_id", *[c for c in policy.overlay_columns if c in df_private.columns]]
-    df_private_reduced = df_private.loc[:, keep_private_cols].copy()
+        view_rows.append(merged)
 
-    df_view = df_public.merge(df_private_reduced, how="left", on="record_id", validate="one_to_one")
+    return view_rows
 
-    # Derived fields
-    if "qc_status" not in df_view.columns:
-        df_view["qc_status"] = pd.Series([pd.NA] * len(df_view), dtype="string")
 
-    if "exclude" not in df_view.columns:
-        df_view["exclude"] = False
+# =============================================================================
+# I/O helpers
+# =============================================================================
 
-    df_view["effective_qc_status"] = df_view["qc_status"].fillna("unknown")
-    df_view["is_excluded"] = df_view["exclude"].fillna(False).astype(bool)
-    df_view["is_usable"] = (df_view["effective_qc_status"] == "pass") & (~df_view["is_excluded"])
+def _read_tsv(path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
+    if not path.exists():
+        raise FileNotFoundError(f"TSV file not found: {path}")
 
-    return df_view, warnings
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        header = list(reader.fieldnames) if reader.fieldnames is not None else []
+        rows: List[Dict[str, str]] = []
+        for row in reader:
+            rows.append({k: (v if v is not None else "") for k, v in row.items()})
+        return rows, header
+
+
+def _index_private_decisions(
+    rows: Sequence[Dict[str, str]],
+    header: Sequence[str],
+) -> Dict[str, Dict[str, str]]:
+    """
+    Index registry_private.tsv by record_id.
+
+    This expects at least the columns in PRIVATE_DECISIONS_EXPECTED_COLUMNS.
+    Extra columns are ignored.
+
+    Usage example
+    -------------
+        index = _index_private_decisions(rows, header)
+    """
+    header_set = set(header)
+    required_missing = [c for c in PRIVATE_DECISIONS_EXPECTED_COLUMNS if c not in header_set]
+    if required_missing:
+        raise ValueError(
+            f"registry_private.tsv missing required columns: {required_missing}. "
+            f"Found: {list(header)}"
+        )
+
+    index: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        record_id = str(row.get("record_id", "")).strip()
+        if not record_id:
+            continue
+        index[record_id] = {
+            "exclude_reason": str(row.get("exclude_reason", "") or ""),
+            "review_date": str(row.get("review_date", "") or ""),
+            "notes": str(row.get("notes", "") or ""),
+        }
+    return index
