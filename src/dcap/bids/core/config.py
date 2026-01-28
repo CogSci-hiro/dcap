@@ -1,5 +1,17 @@
+# src/dcap/bids/core/config.py
 # =============================================================================
-#                          BIDS: Conversion config
+#                         BIDS Core: Conversion config
+# =============================================================================
+#
+# Task-agnostic configuration objects for BIDS conversion.
+#
+# These configs describe *how* conversion should happen (paths, flags, global
+# conventions), but not *what* a task is. Task-specific parameters must live
+# under dcap.bids.tasks.<task>.
+#
+# REVIEW
+# =============================================================================
+# Imports
 # =============================================================================
 
 from dataclasses import dataclass
@@ -7,55 +19,50 @@ from pathlib import Path
 from typing import Optional
 
 
+# =============================================================================
+# Core conversion config
+# =============================================================================
+
 @dataclass(frozen=True)
-class DiapixTimingConfig:
+class BidsCoreConfig:
     """
-    Timing conventions for the Diapix-style recordings.
+    Core, task-agnostic configuration for BIDS conversion.
 
     Parameters
     ----------
-    start_delay_s
-        Delay between start-of-audio file and actual task start marker (seconds).
-    conversation_duration_s
-        Duration of the task segment to retain (seconds).
+    source_root
+        Root directory containing source data for a single subject.
+        Interpretation of its contents is task-dependent.
+    bids_root
+        Root directory of the BIDS dataset to write to.
+    subject
+        BIDS subject label (with or without "sub-" prefix).
+    session
+        Optional BIDS session label (with or without "ses-" prefix).
+    datatype
+        BIDS datatype ("ieeg", "eeg", "meg", "anat", ...).
+    overwrite
+        Whether to overwrite existing BIDS outputs where supported.
+    dry_run
+        If True, do not write any files; only execute logic up to the write step.
+    preload_raw
+        Whether to preload raw data into memory before writing.
+        Some transforms (e.g., padding, montage operations) may require this.
+    line_freq
+        Power line frequency in Hz (e.g., 50 in EU, 60 in US).
 
     Usage example
     -------------
-        timing = DiapixTimingConfig(start_delay_s=4.0, conversation_duration_s=240.0)
-    """
-    start_delay_s: float
-    conversation_duration_s: float
-
-
-@dataclass(frozen=True)
-class BidsConvertConfig:
-    """
-    End-to-end configuration for converting source data to BIDS.
-
-    Notes
-    -----
-    This config is intentionally explicit: no hidden globals.
-
-    Usage example
-    -------------
-        cfg = BidsConvertConfig(
+        cfg = BidsCoreConfig(
             source_root=Path("sourcedata/Nic-Ele"),
             bids_root=Path("bids"),
             subject="NicEle",
             session=None,
-            task="diapix",
             datatype="ieeg",
-            run=None,
-            line_freq=50.0,
-            channels_tsv=Path("config/channels.tsv"),
-            audio_onsets_tsv=Path("config/audio_onsets.tsv"),
-            stim_wav=Path("config/beeps.wav"),
-            subjects_dir=Path("sourcedata/subjects_dir"),
-            original_id="Nic-Ele",
-            atlas_file=Path("sourcedata/subjects_dir/Nic-Ele/elec_recon/elec2atlas.mat"),
-            timing=DiapixTimingConfig(start_delay_s=4.0, conversation_duration_s=240.0),
             overwrite=False,
             dry_run=True,
+            preload_raw=True,
+            line_freq=50.0,
         )
     """
 
@@ -64,21 +71,60 @@ class BidsConvertConfig:
 
     subject: str
     session: Optional[str]
-    task: str
     datatype: str
-    run: Optional[str]
-
-    line_freq: float
-
-    channels_tsv: Optional[Path]
-    audio_onsets_tsv: Optional[Path]
-    stim_wav: Optional[Path]
-
-    subjects_dir: Optional[Path]
-    original_id: Optional[str]
-    atlas_file: Optional[Path]
-
-    timing: DiapixTimingConfig
 
     overwrite: bool
     dry_run: bool
+    preload_raw: bool
+    line_freq: float
+
+
+# =============================================================================
+# Optional anatomy config (core-level, task-independent)
+# =============================================================================
+
+@dataclass(frozen=True)
+class BidsAnatConfig:
+    """
+    Optional configuration for anatomy writing.
+
+    This config is intentionally separate from `BidsCoreConfig` so that anatomy
+    can be:
+      - run as part of a task
+      - run once per subject
+      - or exposed as a separate CLI command later
+
+    Parameters
+    ----------
+    subjects_dir
+        FreeSurfer SUBJECTS_DIR containing reconstructions.
+    original_id
+        Subject identifier under SUBJECTS_DIR (often original clinical ID).
+    bids_subject
+        BIDS subject label without "sub-" prefix.
+    session
+        Optional BIDS session label without "ses-" prefix.
+    deface
+        Whether to deface the anatomical image.
+    overwrite
+        Whether to overwrite existing outputs where supported.
+
+    Usage example
+    -------------
+        anat_cfg = BidsAnatConfig(
+            subjects_dir=Path("sourcedata/subjects_dir"),
+            original_id="Nic-Ele",
+            bids_subject="NicEle",
+            session=None,
+            deface=False,
+            overwrite=True,
+        )
+    """
+
+    subjects_dir: Path
+    original_id: str
+    bids_subject: str
+    session: Optional[str]
+
+    deface: bool
+    overwrite: bool
