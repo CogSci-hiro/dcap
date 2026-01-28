@@ -2,21 +2,25 @@
 #                           CLI: bids (group)
 # =============================================================================
 #
-# Generic CLI for all BIDS tasks:
-# - parse common core args
-# - choose task by name
-# - build task via task registry
-# - call core.convert_subject()
+# No conversion logic here. This module:
+# - defines arguments
+# - converts argparse namespace -> config objects
+# - calls a single library entry point
 #
 # =============================================================================
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.converter import convert_subject
 from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
+from dcap.registry.validate import resolve_private_root
+
+
+PrivateRootMode = Literal["env", "none", "path"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,12 +31,16 @@ class BidsConvertCliConfig:
     Usage example
     -------------
         cfg = BidsConvertCliConfig(
-            source_root=Path("sourcedata/NicEle"),
+            source_root=Path("sourcedata/sub-001"),
             bids_root=Path("bids"),
-            subject="NicEle",
+            bids_subject="sub-001",
             session=None,
+            dataset_id="Timone2025",
             task="diapix",
-            task_assets_dir=Path("assets/diapix"),
+            private_root_mode="env",
+            private_root_path=None,
+            subject_map_yaml=None,
+            task_assets_dir=Path("/private/assets/diapix"),
             overwrite=False,
             dry_run=False,
             preload_raw=True,
@@ -42,10 +50,15 @@ class BidsConvertCliConfig:
 
     source_root: Path
     bids_root: Path
-    subject: str
+    bids_subject: str
     session: Optional[str]
 
+    dataset_id: str
     task: str
+
+    private_root_mode: PrivateRootMode
+    private_root_path: Optional[Path]
+    subject_map_yaml: Optional[Path]
     task_assets_dir: Optional[Path]
 
     overwrite: bool
@@ -65,13 +78,37 @@ def _add_convert(subparsers: Any) -> None:
     p = subparsers.add_parser("convert", help="Convert sourcedata to BIDS using a selected task adapter")
 
     # Core inputs
-    p.add_argument("--source-root", type=Path, required=True)
-    p.add_argument("--bids-root", type=Path, required=True)
-    p.add_argument("--subject", type=str, required=True)
-    p.add_argument("--session", type=str, default=None)
+    p.add_argument("--source-root", type=Path, required=True, help="Task-discovery root (task-specific layout)")
+    p.add_argument("--bids-root", type=Path, required=True, help="BIDS output root")
+
+    # BIDS-facing identity
+    p.add_argument(
+        "--subject",
+        type=str,
+        required=True,
+        help="BIDS subject label (target), accepts '001' or 'sub-001'",
+    )
+    p.add_argument("--session", type=str, default=None, help="Optional BIDS session label without 'ses-'")
 
     # Task selection
     p.add_argument("--task", type=str, required=True, help="Task name (e.g., diapix)")
+    p.add_argument("--dataset-id", type=str, required=True, help="Dataset identifier (must match subject map YAML)")
+
+    # Private root + subject map
+    p.add_argument(
+        "--private-root",
+        type=str,
+        default="env",
+        help="Private root: 'env' (DCAP_PRIVATE_ROOT), 'none' (skip), or a path.",
+    )
+    p.add_argument(
+        "--subject-map-yaml",
+        type=Path,
+        default=None,
+        help="Optional explicit path to subject re-identification YAML (overrides --private-root).",
+    )
+
+    # Task assets
     p.add_argument(
         "--task-assets-dir",
         type=Path,
@@ -86,16 +123,21 @@ def _add_convert(subparsers: Any) -> None:
     p.add_argument("--line-freq-hz", type=float, default=50.0)
 
 
-def run(args) -> int:
+def run(args: argparse.Namespace) -> int:
     if args.bids_cmd != "convert":
         raise RuntimeError(f"Unknown bids subcommand: {args.bids_cmd!r}")
 
     cfg = _parse_convert_args(args)
 
+    private_root = resolve_private_root(
+        private_root_mode=cfg.private_root_mode,
+        private_root_path=cfg.private_root_path,
+    )
+
     core_cfg = BidsCoreConfig(
         source_root=cfg.source_root,
         bids_root=cfg.bids_root,
-        subject=cfg.subject,
+        subject=cfg.bids_subject,   # core will normalize sub- prefix etc.
         session=cfg.session,
         datatype="ieeg",
         overwrite=cfg.overwrite,
@@ -105,23 +147,42 @@ def run(args) -> int:
     )
 
     task_ctx = TaskFactoryContext(
-        subject=cfg.subject,
+        task_name=cfg.task,
+        dataset_id=cfg.dataset_id,
+        bids_subject=cfg.bids_subject,
         session=cfg.session,
+        private_root=private_root,
+        subject_map_yaml=cfg.subject_map_yaml,
         task_assets_dir=cfg.task_assets_dir,
     )
-    task = resolve_task(cfg.task, task_ctx)
+    task = resolve_task(task_ctx)
 
     _ = convert_subject(cfg=core_cfg, task=task)
     return 0
 
 
-def _parse_convert_args(args) -> BidsConvertCliConfig:  # noqa: ANN001
+def _parse_convert_args(args: argparse.Namespace) -> BidsConvertCliConfig:
+    private_root_raw = str(args.private_root).strip()
+    if private_root_raw.lower() in {"none", "null", "skip"}:
+        private_root_mode: PrivateRootMode = "none"
+        private_root_path = None
+    elif private_root_raw.lower() == "env":
+        private_root_mode = "env"
+        private_root_path = None
+    else:
+        private_root_mode = "path"
+        private_root_path = Path(private_root_raw).expanduser().resolve()
+
     return BidsConvertCliConfig(
         source_root=Path(args.source_root).expanduser().resolve(),
         bids_root=Path(args.bids_root).expanduser().resolve(),
-        subject=str(args.subject).strip(),
+        bids_subject=str(args.subject).strip(),
         session=str(args.session).strip() if args.session is not None else None,
+        dataset_id=str(args.dataset_id).strip(),
         task=str(args.task).strip(),
+        private_root_mode=private_root_mode,
+        private_root_path=private_root_path,
+        subject_map_yaml=Path(args.subject_map_yaml).expanduser().resolve() if args.subject_map_yaml is not None else None,
         task_assets_dir=Path(args.task_assets_dir).expanduser().resolve() if args.task_assets_dir is not None else None,
         overwrite=bool(args.overwrite),
         dry_run=bool(args.dry_run),
