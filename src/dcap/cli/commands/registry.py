@@ -171,6 +171,57 @@ def run(args) -> int:
             )
         return 0
 
+    if args.registry_cmd == "view":
+        private_root = resolve_private_root(args.private_root)
+        private_registry = None
+
+        if private_root is not None:
+            candidate = private_root / "registry_private.tsv"
+            private_registry = candidate if candidate.exists() else None
+
+        view_rows = build_registry_view(
+            public_registry=args.public_registry,
+            private_registry=private_registry,
+        )
+
+        total = len(view_rows)
+        excluded = sum(1 for r in view_rows if bool(r.get("excluded", False)))
+        usable = total - excluded
+
+        print("Registry view summary")
+        print(f"  Total records:   {total}")
+        print(f"  Excluded records:{excluded}")
+        print(f"  Usable records:  {usable}")
+
+        if args.summary_only:
+            return 0
+
+        if args.out is not None:
+            write_registry_view_tsv(view_rows=view_rows, out_tsv=args.out)
+            print(f"\nWrote registry view TSV: {args.out}")
+
+        return 0
+
+    if args.registry_cmd == "export-availability":
+        private_root = resolve_private_root(args.private_root)
+        private_registry = None
+
+        if private_root is not None:
+            candidate = private_root / "registry_private.tsv"
+            private_registry = candidate if candidate.exists() else None
+
+        view_rows = build_registry_view(
+            public_registry=args.public_registry,
+            private_registry=private_registry,
+        )
+
+        write_availability_index_by_task(
+            registry_view_rows=view_rows,
+            out_tsv=args.out,
+        )
+        print(f"Wrote availability index TSV: {args.out}")
+        return 0
+
     raise RuntimeError(f"Unknown registry subcommand: {args.registry_cmd!r}")
 
 
