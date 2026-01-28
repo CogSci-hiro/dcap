@@ -209,66 +209,63 @@ flowchart TB
   %% ============================================================
   %% Nodes
   %% ============================================================
-  raw[/"Raw clinical data\n(EDF/BrainVision/etc.)"/]:::private
-  bids[("BIDS dataset\n(anonymized sub-XXX)")]:::shareable
+  keys[("subject_keys.yaml\nbids_subject ↔ dcap_id\nscoped by dataset_id")]:::private
+  subjyaml[(subjects/sub-XXX.yaml\nidentity + acquisitions + protocols)]:::private
+  privreg[("registry_private.tsv\n(optional) run-level decisions")]:::private
 
-  pubreg[(registry_public\n.csv/.parquet)]:::shareable
-  privreg[(registry_private.tsv\nrun-level QC + notes)]:::private
-  subjyaml[(subjects/sub-XXX.yaml\nsubject-level history)]:::private
-  keys[(subject_keys.yaml\nre-ID map)]:::private
+  build{{"Build public registry\n(dcap registry build-public)"}}:::action
+  pubreg[(registry_public.tsv\nsanitized structural index)]:::shareable
 
-  convert{{"BIDS conversion\n(dcap bids/*)"}}:::action
-  scan{{"Scan / update public registry\n(dcap registry scan-bids)"}}:::action
-  edit{{"Manual edits\n(QC + subject metadata)"}}:::action
+  validate{{"Validate registry\n(dcap registry validate)"}}:::action
 
   join{{Runtime join\non record_id}}:::action
   view[("Registry view\n(public + private)\n+ derived flags")]:::derived
 
-  sanitize{{"Sanitize / export\n(drop sensitive fields)"}}:::action
-  safe[("Sanitized products\n(task availability, QC summaries,\nusable indices)")]:::output
+  safe[("Sanitized products\navailability indices,\nQC summaries, etc.")]:::output
 
   guard[/"'NO GIT COMMIT'\n(private files)\n.gitignore + DCAP_PRIVATE_ROOT"/]:::warning
 
   %% ============================================================
   %% Edges
   %% ============================================================
-  raw --> convert --> bids
-  bids --> scan --> pubreg
+  keys --> build
+  subjyaml --> build
+  privreg -. optional input .-> build
+
+  build --> pubreg --> validate
+
+  keys --> validate
+  subjyaml --> validate
+  privreg -. optional input .-> validate
 
   pubreg --> join
   privreg --> join
   subjyaml --> join
 
-  keys -. used only for raw handling/audits .-> convert
-  keys -. never joins registry view .-> guard
+  join --> view --> safe
 
-  edit --> privreg
-  edit --> subjyaml
-
-  privreg --> guard
-  subjyaml --> guard
   keys --> guard
-
-  join --> view --> sanitize --> safe
+  subjyaml --> guard
+  privreg --> guard
 
   %% ============================================================
   %% Grouping (subgraphs)
   %% ============================================================
-  subgraph Shareable["Shareable (version-controlled)"]
-    bids
+  subgraph Shareable["Shareable (can be version-controlled)"]
     pubreg
   end
 
   subgraph Private["Private (local-only under $DCAP_PRIVATE_ROOT)"]
-    privreg
-    subjyaml
     keys
+    subjyaml
+    privreg
   end
 
   subgraph Derived["Derived (runtime / in-memory)"]
     view
     safe
   end
+
 ```
 
 ---

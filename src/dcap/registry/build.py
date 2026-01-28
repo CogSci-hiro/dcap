@@ -3,9 +3,7 @@
 #                     Registry: public registry builder
 # =============================================================================
 
-from __future__ import annotations
-
-from dataclasses import dataclass
+import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -20,11 +18,12 @@ import yaml
 PUBLIC_REGISTRY_COLUMNS: Tuple[str, ...] = (
     "dataset_id",
     "subject",
-    "dcap_id",
     "session",
     "acquisition_id",
     "protocol_id",
     "task",
+    "age",
+    "sex",
     "record_id",
 )
 
@@ -107,6 +106,32 @@ def _protocols_for_session(subject_data: Dict[str, Any], session: str) -> List[D
 
 
 # =============================================================================
+# Date helpers
+# =============================================================================
+
+
+def _parse_iso_date(value: str) -> Optional[dt.date]:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _compute_age_years(*, date_of_birth: Optional[dt.date], reference_date: Optional[dt.date]) -> str:
+    if date_of_birth is None or reference_date is None:
+        return ""
+    if reference_date < date_of_birth:
+        return ""
+    years = reference_date.year - date_of_birth.year
+    if (reference_date.month, reference_date.day) < (date_of_birth.month, date_of_birth.day):
+        years -= 1
+    return str(years)
+
+
+# =============================================================================
 # Public builder
 # =============================================================================
 
@@ -177,6 +202,24 @@ def build_public_registry(
             acquisition_id = str(acq.get("acquisition_id", "")).strip()
             session = str(acq.get("session", "")).strip()
 
+            # ---------------------------------------------------------------------
+            # Public demographics (derived, non-identifying)
+            # ---------------------------------------------------------------------
+            identity = subject_data.get("identity", {})
+            sex = ""
+            dob = None
+
+            if isinstance(identity, dict):
+                sex = str(identity.get("sex", "")).strip()
+                dob_raw = str(identity.get("date_of_birth", "")).strip()
+                dob = _parse_iso_date(dob_raw)
+
+            acq_date = _parse_iso_date(str(acq.get("date", "")).strip())
+            age_years = _compute_age_years(
+                date_of_birth=dob,
+                reference_date=acq_date,
+            )
+
             if not acquisition_id or not session:
                 raise ValueError(
                     f"Acquisition missing acquisition_id/session in {subject_file.name}: {acq}"
@@ -196,11 +239,12 @@ def build_public_registry(
                         {
                             "dataset_id": dataset_id,
                             "subject": bids_subject,
-                            "dcap_id": dcap_id,
                             "session": session,
                             "acquisition_id": acquisition_id,
                             "protocol_id": protocol_id,
                             "task": task,
+                            "sex": sex,
+                            "age": age_years,
                             "record_id": record_id,
                         }
                     )
@@ -211,7 +255,6 @@ def build_public_registry(
                     {
                         "dataset_id": dataset_id,
                         "subject": bids_subject,
-                        "dcap_id": dcap_id,
                         "session": session,
                         "acquisition_id": acquisition_id,
                         "protocol_id": "",

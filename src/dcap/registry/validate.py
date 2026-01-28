@@ -37,7 +37,6 @@ IssueLevel = Literal["error", "warning"]
 PUBLIC_REGISTRY_REQUIRED_COLUMNS: Tuple[str, ...] = (
     "dataset_id",
     "subject",
-    "dcap_id",
     "session",
     "acquisition_id",
     "protocol_id",
@@ -559,7 +558,6 @@ def _validate_registry_public_tsv(path: Path) -> List[ValidationIssue]:
         session = row.get("session", "")
         acquisition_id = row.get("acquisition_id", "")
         protocol_id = row.get("protocol_id", "")
-        task = row.get("task", "")
 
         if _is_non_empty_str(subject) and not SUBJECT_PATTERN.match(subject):
             issues.append(
@@ -614,7 +612,6 @@ def _validate_registry_public_tsv(path: Path) -> List[ValidationIssue]:
                 )
 
     return issues
-
 
 
 # =============================================================================
