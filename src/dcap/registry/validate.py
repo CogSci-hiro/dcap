@@ -273,7 +273,9 @@ def _validate_subject_keys_yaml(path: Path) -> List[ValidationIssue]:
 
     datasets = data.get("datasets")
     if not isinstance(datasets, dict):
-        issues.append(ValidationIssue(level="error", location=f"{path.name}:datasets", message="datasets must be a mapping (dict)"))
+        issues.append(
+            ValidationIssue(level="error", location=f"{path.name}:datasets", message="datasets must be a mapping (dict)")
+        )
         return issues
 
     for dataset_id, entries in datasets.items():
@@ -291,19 +293,21 @@ def _validate_subject_keys_yaml(path: Path) -> List[ValidationIssue]:
                 continue
 
             bids_subject = entry.get("bids_subject")
-            local_subject_id = entry.get("dcap_id")
+            dcap_id = entry.get("dcap_id")
 
             if not _is_non_empty_str(bids_subject):
                 issues.append(ValidationIssue(level="error", location=f"{loc}.bids_subject", message="missing required field"))
             elif not SUBJECT_PATTERN.match(str(bids_subject)):
                 issues.append(ValidationIssue(level="error", location=f"{loc}.bids_subject", message="must match sub-###"))
 
-            if not _is_non_empty_str(local_subject_id):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.local_subject_id", message="missing required field"))
+            if not _is_non_empty_str(dcap_id):
+                issues.append(ValidationIssue(level="error", location=f"{loc}.dcap_id", message="missing required field"))
 
             if _is_non_empty_str(bids_subject):
                 if str(bids_subject) in seen:
-                    issues.append(ValidationIssue(level="error", location=f"{loc}.bids_subject", message="duplicate bids_subject within dataset"))
+                    issues.append(
+                        ValidationIssue(level="error", location=f"{loc}.bids_subject", message="duplicate bids_subject within dataset")
+                    )
                 seen.add(str(bids_subject))
 
             implant_date = entry.get("implant_date")
@@ -358,13 +362,37 @@ def _validate_subject_yaml(path: Path) -> List[ValidationIssue]:
     if isinstance(identity, dict):
         dob = identity.get("date_of_birth")
         if _is_non_empty_str(dob) and _parse_iso_date(str(dob)) is None:
-            issues.append(ValidationIssue(level="error", location=f"{path.name}:identity.date_of_birth", message="invalid ISO date (YYYY-MM-DD)"))
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    location=f"{path.name}:identity.date_of_birth",
+                    message="invalid ISO date (YYYY-MM-DD)",
+                )
+            )
 
         sex = identity.get("sex")
         if _is_non_empty_str(sex):
-            allowed = {"male", "female", "other", "unknown"}
-            if str(sex) not in allowed:
-                issues.append(ValidationIssue(level="error", location=f"{path.name}:identity.sex", message=f"must be one of {sorted(allowed)}"))
+            allowed_sex = {"male", "female", "other", "unknown"}
+            if str(sex) not in allowed_sex:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        location=f"{path.name}:identity.sex",
+                        message=f"must be one of {sorted(allowed_sex)}",
+                    )
+                )
+
+        handedness = identity.get("handedness")
+        if _is_non_empty_str(handedness):
+            allowed_hand = {"right", "left", "unknown"}
+            if str(handedness) not in allowed_hand:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        location=f"{path.name}:identity.handedness",
+                        message=f"must be one of {sorted(allowed_hand)} (or empty)",
+                    )
+                )
 
     # acquisitions
     acquisitions = data.get("acquisitions")
@@ -429,27 +457,27 @@ def _validate_subject_yaml(path: Path) -> List[ValidationIssue]:
                         issues.append(ValidationIssue(level="warning", location=f"{loc}.sessions[{j}]", message="session should look like ses-01 / ses-XYZ"))
 
     # medication (light checks)
-    medication = data.get("medication")
-    if medication is not None and not isinstance(medication, list):
-        issues.append(ValidationIssue(level="error", location=f"{path.name}:medication", message="must be a list"))
-    if isinstance(medication, list):
-        for i, item in enumerate(medication):
-            loc = f"{path.name}:medication[{i}]"
-            if not isinstance(item, dict):
-                issues.append(ValidationIssue(level="error", location=loc, message="entry must be a mapping (dict)"))
-                continue
-
-            start = item.get("start_date")
-            if _is_non_empty_str(start) and _parse_iso_date(str(start)) is None:
-                issues.append(ValidationIssue(level="error", location=f"{loc}.start_date", message="invalid ISO date (YYYY-MM-DD)"))
-
-            end = item.get("end_date")
-            if _is_non_empty_str(end) and _parse_iso_date(str(end)) is None:
-                issues.append(ValidationIssue(level="error", location=f"{loc}.end_date", message="invalid ISO date (YYYY-MM-DD)"))
-
-            drugs = item.get("drugs")
-            if drugs is not None and not isinstance(drugs, list):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.drugs", message="drugs must be a list"))
+    medication_scale = item.get("medication")
+    if medication_scale is not None and medication_scale != "":
+        try:
+            medication_int = int(medication_scale)
+        except (TypeError, ValueError):
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    location=f"{loc}.medication",
+                    message="medication must be an integer in [0, 1, 2, 3] (or empty)",
+                )
+            )
+        else:
+            if medication_int not in {0, 1, 2, 3}:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        location=f"{loc}.medication",
+                        message="medication must be in [0, 1, 2, 3]",
+                    )
+                )
 
     return issues
 
