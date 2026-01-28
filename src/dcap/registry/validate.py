@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 import re
 import csv
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 import yaml
 
@@ -408,76 +408,64 @@ def _validate_subject_yaml(path: Path) -> List[ValidationIssue]:
 
             acq_id = item.get("acquisition_id")
             if not _is_non_empty_str(acq_id):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.acquisition_id", message="missing required field"))
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        location=f"{loc}.acquisition_id",
+                        message="missing required field",
+                    )
+                )
             else:
                 if str(acq_id) in seen_acq:
-                    issues.append(ValidationIssue(level="error", location=f"{loc}.acquisition_id", message="duplicate acquisition_id (must be unique per subject)"))
+                    issues.append(
+                        ValidationIssue(
+                            level="error",
+                            location=f"{loc}.acquisition_id",
+                            message="duplicate acquisition_id (must be unique per subject)",
+                        )
+                    )
                 seen_acq.add(str(acq_id))
 
             date = item.get("date")
             if _is_non_empty_str(date) and _parse_iso_date(str(date)) is None:
-                issues.append(ValidationIssue(level="error", location=f"{loc}.date", message="invalid ISO date (YYYY-MM-DD)"))
+                issues.append(
+                    ValidationIssue(level="error", location=f"{loc}.date", message="invalid ISO date (YYYY-MM-DD)"))
 
             session = item.get("session")
             if not _is_non_empty_str(session):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.session", message="missing required field"))
+                issues.append(
+                    ValidationIssue(level="error", location=f"{loc}.session", message="missing required field"))
             elif not SESSION_PATTERN.match(str(session)):
-                issues.append(ValidationIssue(level="warning", location=f"{loc}.session", message="session should look like ses-01 / ses-XYZ"))
-
-    # protocols
-    protocols = data.get("protocols")
-    if protocols is not None and not isinstance(protocols, list):
-        issues.append(ValidationIssue(level="error", location=f"{path.name}:protocols", message="must be a list"))
-    if isinstance(protocols, list):
-        seen_proto: set[str] = set()
-        for i, item in enumerate(protocols):
-            loc = f"{path.name}:protocols[{i}]"
-            if not isinstance(item, dict):
-                issues.append(ValidationIssue(level="error", location=loc, message="entry must be a mapping (dict)"))
-                continue
-
-            protocol_id = item.get("protocol_id")
-            if not _is_non_empty_str(protocol_id):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.protocol_id", message="missing required field"))
-            else:
-                if str(protocol_id) in seen_proto:
-                    issues.append(ValidationIssue(level="error", location=f"{loc}.protocol_id", message="duplicate protocol_id (must be unique per subject)"))
-                seen_proto.add(str(protocol_id))
-
-            task = item.get("task")
-            if not _is_non_empty_str(task):
-                issues.append(ValidationIssue(level="error", location=f"{loc}.task", message="missing required field"))
-
-            sessions = item.get("sessions")
-            if not isinstance(sessions, list) or len(sessions) == 0:
-                issues.append(ValidationIssue(level="error", location=f"{loc}.sessions", message="sessions must be a non-empty list"))
-            else:
-                for j, s in enumerate(sessions):
-                    if _is_non_empty_str(s) and not SESSION_PATTERN.match(str(s)):
-                        issues.append(ValidationIssue(level="warning", location=f"{loc}.sessions[{j}]", message="session should look like ses-01 / ses-XYZ"))
-
-    # medication (light checks)
-    medication_scale = item.get("medication")
-    if medication_scale is not None and medication_scale != "":
-        try:
-            medication_int = int(medication_scale)
-        except (TypeError, ValueError):
-            issues.append(
-                ValidationIssue(
-                    level="error",
-                    location=f"{loc}.medication",
-                    message="medication must be an integer in [0, 1, 2, 3] (or empty)",
-                )
-            )
-        else:
-            if medication_int not in {0, 1, 2, 3}:
                 issues.append(
                     ValidationIssue(
-                        level="error",
-                        location=f"{loc}.medication",
-                        message="medication must be in [0, 1, 2, 3]",
+                        level="warning",
+                        location=f"{loc}.session",
+                        message="session should look like ses-01 / ses-XYZ",
                     )
                 )
+
+            # medication (light checks) — PER ACQUISITION
+            medication_scale = item.get("medication")
+            if medication_scale is not None and medication_scale != "":
+                try:
+                    medication_int = int(medication_scale)
+                except (TypeError, ValueError):
+                    issues.append(
+                        ValidationIssue(
+                            level="error",
+                            location=f"{loc}.medication",
+                            message="medication must be an integer in [0, 1, 2, 3] (or empty)",
+                        )
+                    )
+                else:
+                    if medication_int not in {0, 1, 2, 3}:
+                        issues.append(
+                            ValidationIssue(
+                                level="error",
+                                location=f"{loc}.medication",
+                                message="medication must be in [0, 1, 2, 3]",
+                            )
+                        )
 
     return issues
 
@@ -629,7 +617,7 @@ def _read_tsv(path: Path, issues: List[ValidationIssue]) -> Tuple[Optional[List[
             rows = []
             for row in reader:
                 # Normalize None -> "" for safety
-                rows.append({k: (v if v is not None else "") for k, v in row.items()})
+                rows.append({k: (v if v is not None else "") for k, v in row.items()})  # noqa
             return rows, header
     except Exception as exc:  # noqa: BLE001
         issues.append(ValidationIssue(level="error", location=str(path), message=f"failed to read TSV: {exc}"))

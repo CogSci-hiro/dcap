@@ -10,11 +10,13 @@
 # REVIEW
 # =============================================================================
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from dcap.registry.validate import resolve_private_root, validate_registry
+from dcap.registry.build import build_public_registry
 
 
 # =============================================================================
@@ -51,7 +53,7 @@ class RegistryValidateCliConfig:
 # argparse wiring
 # =============================================================================
 
-def add_subparser(subparsers) -> None:  # noqa: ANN001
+def add_subparser(subparsers: Any) -> None:
     """
     Register the `registry` command group.
 
@@ -59,18 +61,11 @@ def add_subparser(subparsers) -> None:  # noqa: ANN001
     -------------
         dcap registry --help
     """
-    parser = subparsers.add_parser(
-        "registry",
-        help="Registry utilities (validate, scan-bids, export-sanitized, ...).",
-    )
+    registry_parser = subparsers.add_parser("registry", help="Registry utilities")
+    registry_sub = registry_parser.add_subparsers(dest="registry_cmd", required=True)
 
-    registry_subparsers = parser.add_subparsers(
-        dest="registry_command",
-        required=True,
-        metavar="<registry-command>",
-    )
-
-    _add_registry_validate(registry_subparsers)
+    _add_registry_validate(registry_sub)
+    _add_build_public_subcommand(registry_sub)
 
 
 def _add_registry_validate(subparsers) -> None:  # noqa: ANN001
@@ -118,22 +113,30 @@ def _add_registry_validate(subparsers) -> None:  # noqa: ANN001
 # Execution
 # =============================================================================
 
-def run(args) -> None:  # noqa: ANN001
-    """
-    Execute `dcap registry ...`.
+def run(args) -> int:
+    if args.registry_cmd == "validate":
+        return validate_registry(
+            public_registry=Path(args.public_registry),
+            private_root=Path(args.private_root) if args.private_root is not None else None,
+            strict=bool(args.strict),
+        )
 
-    Usage example
-    -------------
-        # See dcap.cli.main usage example
-    """
-    # in run(args):
-    private_root = resolve_private_root(str(args.private_root))
-    exit_code = validate_registry(
-        public_registry=Path(args.public_registry),
-        private_root=private_root,
-        strict=bool(args.strict),
-    )
-    raise SystemExit(exit_code)
+    if args.registry_cmd == "build-public":
+        out_path = build_public_registry(
+            public_registry_out=Path(args.out),
+            private_root=Path(args.private_root),
+            dataset_id=args.dataset_id,
+            strict=bool(args.strict),
+        )
+        if args.validate:
+            return validate_registry(
+                public_registry=out_path,
+                private_root=Path(args.private_root),
+                strict=bool(args.strict),
+            )
+        return 0
+
+    raise RuntimeError(f"Unknown registry subcommand: {args.registry_cmd!r}")
 
 
 def _parse_validate_args(args) -> RegistryValidateCliConfig:  # noqa: ANN001
@@ -155,4 +158,48 @@ def _parse_validate_args(args) -> RegistryValidateCliConfig:  # noqa: ANN001
         private_root_mode=private_root_mode,
         private_root_path=private_root_path,
         strict=bool(args.strict),
+    )
+
+
+def _add_build_public_subcommand(subparsers: Any) -> None:
+    p = subparsers.add_parser("build-public", help="Build sanitized public registry TSV")
+    p.add_argument("--private-root", type=Path, required=True)
+    p.add_argument("--dataset-id", type=str, default=None)
+    p.add_argument("--out", type=Path, required=True, help="Output public TSV path")
+    p.add_argument("--validate", action="store_true", help="Run validation after building")
+    p.add_argument("--strict", action="store_true", help="Stricter builder behavior")
+    p.set_defaults(func=_run_build_public)
+
+
+def _add_validate_subcommand(subparsers: Any) -> None:
+    p = subparsers.add_parser("validate", help="Validate registry inputs")
+    p.add_argument("--private-root", type=Path, required=True)
+    p.add_argument("--public-registry", type=Path, required=True)
+    p.add_argument("--strict", action="store_true")
+    p.set_defaults(func=_run_validate)
+
+
+def _run_build_public(args: argparse.Namespace) -> int:
+    out_path = build_public_registry(
+        public_registry_out=args.out,
+        private_root=args.private_root,
+        dataset_id=args.dataset_id,
+        strict=args.strict,
+    )
+
+    if args.validate:
+        return validate_registry(
+            public_registry=out_path,
+            private_root=args.private_root,
+            strict=args.strict,
+        )
+
+    return 0
+
+
+def _run_validate(args: argparse.Namespace) -> int:
+    return validate_registry(
+        public_registry=args.public_registry,
+        private_root=args.private_root,
+        strict=args.strict,
     )
