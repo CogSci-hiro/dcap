@@ -68,6 +68,8 @@ def add_subparser(subparsers: Any) -> None:
 
     _add_registry_validate(registry_sub)
     _add_build_public_subcommand(registry_sub)
+    _add_view_subcommand(registry_sub)
+    _add_export_availability_subcommand(registry_sub)
 
 
 def _add_registry_validate(subparsers) -> None:  # noqa: ANN001
