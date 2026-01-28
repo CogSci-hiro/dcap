@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from dcap.registry.validate import validate_everything
+from dcap.registry.validate import resolve_private_root, validate_everything
 
 
 # =============================================================================
@@ -126,14 +126,14 @@ def run(args) -> None:  # noqa: ANN001
     -------------
         # See dcap.cli.main usage example
     """
-    registry_command = str(args.registry_command)
-
-    if registry_command == "validate":
-        cfg = _parse_validate_args(args)
-        exit_code = int(validate_everything(cfg))
-        raise SystemExit(exit_code)
-
-    raise RuntimeError(f"Unknown registry subcommand: {registry_command}")
+    private_root = resolve_private_root(str(args.private_root))
+    exit_code = validate_everything(
+        public_registry=Path(args.public_registry),
+        spec_dir=Path(args.spec_dir),
+        private_root=private_root,
+        strict=bool(args.strict),
+    )
+    raise SystemExit(int(exit_code))
 
 
 def _parse_validate_args(args) -> RegistryValidateCliConfig:  # noqa: ANN001
