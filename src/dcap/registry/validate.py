@@ -36,12 +36,12 @@ IssueLevel = Literal["error", "warning"]
 
 PUBLIC_REGISTRY_REQUIRED_COLUMNS: Tuple[str, ...] = (
     "dataset_id",
-    "bids_root",
     "subject",
+    "dcap_id",
     "session",
+    "acquisition_id",
+    "protocol_id",
     "task",
-    "run",
-    "datatype",
     "record_id",
 )
 
@@ -557,36 +557,64 @@ def _validate_registry_public_tsv(path: Path) -> List[ValidationIssue]:
         dataset_id = row.get("dataset_id", "")
         subject = row.get("subject", "")
         session = row.get("session", "")
+        acquisition_id = row.get("acquisition_id", "")
+        protocol_id = row.get("protocol_id", "")
         task = row.get("task", "")
-        run = row.get("run", "")
-        datatype = row.get("datatype", "")
 
         if _is_non_empty_str(subject) and not SUBJECT_PATTERN.match(subject):
-            issues.append(ValidationIssue(level="error", location=f"{loc_row}:subject", message="must match sub-###"))
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    location=f"{loc_row}:subject",
+                    message="must match sub-###",
+                )
+            )
 
         if _is_non_empty_str(session) and not SESSION_PATTERN.match(session):
-            issues.append(ValidationIssue(level="warning", location=f"{loc_row}:session", message="session should look like ses-01 / ses-XYZ"))
+            issues.append(
+                ValidationIssue(
+                    level="warning",
+                    location=f"{loc_row}:session",
+                    message="session should look like ses-01 / ses-XYZ",
+                )
+            )
 
         if not _is_non_empty_str(record_id):
-            issues.append(ValidationIssue(level="error", location=f"{loc_row}:record_id", message="missing required value"))
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    location=f"{loc_row}:record_id",
+                    message="missing required value",
+                )
+            )
+            continue
+
+        if record_id in seen_record_id:
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    location=f"{loc_row}:record_id",
+                    message="duplicate record_id",
+                )
+            )
         else:
-            if record_id in seen_record_id:
-                issues.append(ValidationIssue(level="error", location=f"{loc_row}:record_id", message="duplicate record_id"))
             seen_record_id.add(record_id)
 
-            # Consistency check (only if the required parts exist)
-            if all(_is_non_empty_str(x) for x in (dataset_id, subject, session, task, run, datatype)):
-                expected = f"{dataset_id}|{subject}|{session}|{task}|{run}|{datatype}"
-                if record_id != expected:
-                    issues.append(
-                        ValidationIssue(
-                            level="error",
-                            location=f"{loc_row}:record_id",
-                            message=f"record_id mismatch; expected {expected!r}",
-                        )
+        # Consistency check (only if the required parts exist)
+        if all(_is_non_empty_str(x) for x in (dataset_id, subject, session, acquisition_id)):
+            protocol_id_for_id = protocol_id if _is_non_empty_str(protocol_id) else "none"
+            expected = f"{dataset_id}|{subject}|{session}|{acquisition_id}|{protocol_id_for_id}"
+            if record_id != expected:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        location=f"{loc_row}:record_id",
+                        message=f"record_id mismatch; expected {expected!r}",
                     )
+                )
 
     return issues
+
 
 
 # =============================================================================

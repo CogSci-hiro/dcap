@@ -126,7 +126,6 @@ def run(args) -> int:
             public_registry_out=Path(args.out),
             private_root=Path(args.private_root),
             dataset_id=args.dataset_id,
-            strict=bool(args.strict),
         )
         if args.validate:
             return validate_registry(
