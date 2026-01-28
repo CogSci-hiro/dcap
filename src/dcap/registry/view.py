@@ -184,3 +184,29 @@ def _index_private_decisions(
             "notes": str(row.get("notes", "") or ""),
         }
     return index
+
+
+def write_registry_view_tsv(*, view_rows: Sequence[Dict[str, Any]], out_tsv: Path) -> Path:
+    """
+    Write the runtime registry view to a TSV (local-only artifact).
+
+    Notes
+    -----
+    This is NOT a sanitized product; it may contain private notes/reasons.
+    """
+    if not view_rows:
+        out_tsv.parent.mkdir(parents=True, exist_ok=True)
+        out_tsv.write_text("", encoding="utf-8")
+        return out_tsv
+
+    fieldnames = list(view_rows[0].keys())
+
+    out_tsv.parent.mkdir(parents=True, exist_ok=True)
+    with out_tsv.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        for row in view_rows:
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
+
+    return out_tsv
+
