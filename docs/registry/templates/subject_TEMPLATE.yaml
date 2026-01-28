@@ -30,8 +30,9 @@ identity:
 # 2. Implantation / hardware
 # ---------------------------------------------------------------------------
 implantation:
-  electrode_type: ""      # e.g., sEEG, ECoG
-  manufacturer: ""
+  electrode_type: "sEEG"      # e.g., sEEG, ECoG
+  manufacturer: ""            # e.g., DIXI, ALCIS
+  reference: ""               # e.g., OR6-7
   notes: ""
 
 # ---------------------------------------------------------------------------
@@ -43,17 +44,7 @@ acquisitions:
     place: ""             # Acquisition site (private)
     session: ses-01
     notes: ""
-
-# ---------------------------------------------------------------------------
-# 4. Medication history (repeatable, time-indexed)
-# ---------------------------------------------------------------------------
-medication:
-  - start_date: ""        # YYYY-MM-DD
-    end_date: ""          # YYYY-MM-DD (optional)
-    drugs:
-      - name: ""
-        dose_mg: ""
-    notes: ""
+    medication: 0         # scale of 0-3
 
 # ---------------------------------------------------------------------------
 # 5. Experimental protocols (repeatable)
@@ -62,7 +53,6 @@ protocols:
   - protocol_id: proto_01
     task: conversation
     sessions: [ses-01]
-    setup: ""
     notes: ""
 
 # ---------------------------------------------------------------------------
