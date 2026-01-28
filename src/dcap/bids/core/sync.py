@@ -12,7 +12,7 @@ from typing import Tuple
 
 import numpy as np
 
-from dcap.bids.io import load_wav
+from dcap.bids.core.io import load_wav
 
 
 def get_wav_trigger_onsets_and_intervals(

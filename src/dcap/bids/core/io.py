@@ -10,7 +10,7 @@ import mne
 import numpy as np
 from scipy.io import wavfile
 
-from dcap.bids.heuristics import SourceItem
+from dcap.bids.tasks.diapix.heuristics import SourceItem
 
 
 def fix_brainvision_header_utf8(vhdr_path: Path) -> None:

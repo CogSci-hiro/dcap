@@ -13,8 +13,7 @@ registry layer at runtime.
 #                                DCAP: BIDS
 # =============================================================================
 
-from dcap.bids.config import BidsConvertConfig, DiapixTimingConfig
-from dcap.bids.converter import convert_subject_to_bids
+from dcap.bids.core.config import BidsConvertConfig, DiapixTimingConfig
 
 __all__ = [
     "BidsConvertConfig",
