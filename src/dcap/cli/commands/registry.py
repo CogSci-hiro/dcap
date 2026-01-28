@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from dcap.registry.validate import resolve_private_root, validate_everything
+from dcap.registry.validate import resolve_private_root, validate_registry
 
 
 # =============================================================================
@@ -126,14 +126,14 @@ def run(args) -> None:  # noqa: ANN001
     -------------
         # See dcap.cli.main usage example
     """
+    # in run(args):
     private_root = resolve_private_root(str(args.private_root))
-    exit_code = validate_everything(
+    exit_code = validate_registry(
         public_registry=Path(args.public_registry),
-        spec_dir=Path(args.spec_dir),
         private_root=private_root,
         strict=bool(args.strict),
     )
-    raise SystemExit(int(exit_code))
+    raise SystemExit(exit_code)
 
 
 def _parse_validate_args(args) -> RegistryValidateCliConfig:  # noqa: ANN001
