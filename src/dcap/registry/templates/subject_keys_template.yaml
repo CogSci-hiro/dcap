@@ -1,0 +1,90 @@
+# =============================================================================
+# Private subject metadata — sub-001
+# =============================================================================
+
+subject: sub-001
+dataset_id: siteA_2024
+
+# ---------------------------------------------------------------------------
+# 1. Stable identity (subject-level, non-repeating)
+# ---------------------------------------------------------------------------
+identity:
+  name: "John Doe"          # private
+  sex: male                 # male | female | other | unknown
+  date_of_birth: 1987-06-14 # ISO date
+
+# ---------------------------------------------------------------------------
+# 2. Hardware / implantation (usually stable, but explicit)
+# ---------------------------------------------------------------------------
+implantation:
+  electrode_type: SEEG
+  manufacturer: DIXI
+  contact_count: 128
+  notes: >
+    Standard depth electrodes, left temporal focus.
+
+# ---------------------------------------------------------------------------
+# 3. Acquisition events (repeatable, per session / per visit)
+# ---------------------------------------------------------------------------
+acquisitions:
+  - acquisition_id: A1
+    date: 2024-03-21
+    place: Hospital_A
+    session: ses-01
+    notes: >
+      Initial implantation day.
+
+  - acquisition_id: A2
+    date: 2024-03-24
+    place: Hospital_A
+    session: ses-02
+    notes: >
+      Post-revision recording.
+
+# ---------------------------------------------------------------------------
+# 4. Medication history (repeatable, time-indexed)
+# ---------------------------------------------------------------------------
+medication:
+  - start_date: 2024-03-01
+    end_date: 2024-03-23
+    drugs:
+      - name: levetiracetam
+        dose_mg: 2000
+      - name: lamotrigine
+        dose_mg: 300
+    notes: >
+      Stable medication during early recordings.
+
+  - start_date: 2024-03-24
+    drugs:
+      - name: levetiracetam
+        dose_mg: 1500
+    notes: >
+      Dose reduced after seizure cluster.
+
+# ---------------------------------------------------------------------------
+# 5. Experimental protocols (repeatable, per task or setup)
+# ---------------------------------------------------------------------------
+protocols:
+  - protocol_id: conv_v1
+    task: conversation
+    sessions: [ses-01, ses-02]
+    setup: "dual-mic, face-to-face"
+    notes: >
+      Free conversation with experimenter.
+
+  - protocol_id: localizer_v2
+    task: phoneme
+    sessions: [ses-02]
+    setup: "auditory oddball"
+    notes: >
+      Standard phoneme localizer.
+
+# ---------------------------------------------------------------------------
+# 6. Catch-all annotations (optional)
+# ---------------------------------------------------------------------------
+notes:
+  - date: 2024-03-25
+    author: HY
+    text: >
+      Significant fatigue toward end of stay.
