@@ -1,14 +1,10 @@
+# dcap/bids/tasks/diapix/audio.py
 # =============================================================================
-#                          BIDS: Audio handling
-# =============================================================================
-#
-# Crop and (optionally) normalize WAV audio.
-#
-# REVIEW
+#                               DIAPIX AUDIO
 # =============================================================================
 
 from pathlib import Path
-from typing import Optional
+from typing import Final
 
 import numpy as np
 import pandas as pd
@@ -16,105 +12,87 @@ import pydub
 from scipy.io import wavfile
 
 
-def load_audio_onsets_tsv(audio_onsets_tsv: Path) -> pd.DataFrame:
-    """
-    Load audio onset table.
-
-    Expected columns
-    ----------------
-    - subject
-    - run
-    - onset
-
-    Returns
-    -------
-    pd.DataFrame
-
-    Example format
-    --------------
-    +---------+-----+-------+
-    | subject | run | onset |
-    +---------+-----+-------+
-    | NicEle  | 1   | 12.34 |
-    | NicEle  | 2   | 10.10 |
-    +---------+-----+-------+
-
-    Usage example
-    -------------
-        df = load_audio_onsets_tsv(Path("audio_onsets.tsv"))
-    """
-    return pd.read_csv(audio_onsets_tsv, sep="\t")
+CONVERSATION_DURATION_S: Final[float] = 4.0 * 60.0
+NORMALIZE_HEADROOM_DB: Final[float] = 10.0
 
 
-def crop_and_write_audio(
+def crop_and_normalize_audio(
+    *,
     src_wav: Path,
     dst_wav: Path,
-    onset_s: float,
-    duration_s: float,
-    normalize_headroom_db: Optional[float] = 10.0,
+    audio_onsets_tsv: Path,
+    subject_bids: str,
+    run: str,
 ) -> None:
     """
-    Crop a WAV file to [onset, onset+duration] and write it out. Optionally normalize per channel.
+    Crop Diapix WAV using a manually curated onset table and normalize each channel.
 
     Parameters
     ----------
     src_wav
-        Input WAV path.
+        Original WAV file (uncropped).
     dst_wav
-        Output WAV path.
-    onset_s
-        Crop start in seconds.
-    duration_s
-        Crop duration in seconds.
-    normalize_headroom_db
-        If not None, normalize each channel using pydub with given headroom (dB).
+        Output WAV file.
+    audio_onsets_tsv
+        Path to `audio_onsets.tsv` containing onset seconds per subject/run.
+        Expected columns: subject, run, onset
+    subject_bids
+        BIDS subject label without "sub-".
+    run
+        Run number as string.
 
     Usage example
     -------------
-        crop_and_write_audio(Path("in.wav"), Path("out.wav"), onset_s=12.3, duration_s=240.0)
+        crop_and_normalize_audio(
+            src_wav=Path("conversation_1.wav"),
+            dst_wav=Path("sub-NicEle_task-diapix_run-1.wav"),
+            audio_onsets_tsv=Path("audio_onsets.tsv"),
+            subject_bids="NicEle",
+            run="1",
+        )
     """
+    if not src_wav.exists():
+        raise FileNotFoundError(f"Missing WAV: {src_wav}")
+
+    audio_df = pd.read_csv(audio_onsets_tsv, sep="\t")
+    required_cols = {"subject", "run", "onset"}
+    missing = required_cols - set(audio_df.columns)
+    if missing:
+        raise ValueError(f"{audio_onsets_tsv} missing columns: {sorted(missing)}")
+
+    run_int = int(run)
+    row = audio_df[(audio_df["subject"] == subject_bids) & (audio_df["run"] == run_int)]
+    if row.empty:
+        raise ValueError(f"No onset row for subject={subject_bids}, run={run}")
+
+    onset_s = float(row["onset"].values[0])
+
     sr, wav = wavfile.read(src_wav)
 
-    start = int(round(float(onset_s) * sr))
-    end = int(round((float(onset_s) + float(duration_s)) * sr))
+    start = int(onset_s * sr)
+    stop = int((onset_s + CONVERSATION_DURATION_S) * sr)
+    wav = wav[start:stop]
 
-    cropped = wav[start:end]
+    if wav.ndim != 2 or wav.shape[1] != 2:
+        raise ValueError(f"Expected stereo WAV (n_samples, 2). Got shape={wav.shape}")
 
     dst_wav.parent.mkdir(parents=True, exist_ok=True)
 
-    if normalize_headroom_db is None:
-        wavfile.write(dst_wav, sr, cropped)
-        return
-
-    if cropped.ndim == 1:
-        # Mono
-        audio_segment = pydub.AudioSegment(
-            cropped.tobytes(),
-            frame_rate=sr,
-            sample_width=cropped.dtype.itemsize,
-            channels=1,
-        )
-        normalized = pydub.effects.normalize(audio_segment, headroom=float(normalize_headroom_db))
-        normalized.export(dst_wav, format="wav")
-        return
-
-    if cropped.shape[1] != 2:
-        raise ValueError("Expected stereo WAV for per-channel normalization in this skeleton.")
-
-    ch0 = pydub.AudioSegment(
-        cropped[:, 0].tobytes(),
+    seg_left = pydub.AudioSegment(
+        wav[:, 0].tobytes(),
         frame_rate=sr,
-        sample_width=cropped.dtype.itemsize,
+        sample_width=wav.dtype.itemsize,
         channels=1,
     )
-    ch1 = pydub.AudioSegment(
-        cropped[:, 1].tobytes(),
+    seg_right = pydub.AudioSegment(
+        wav[:, 1].tobytes(),
         frame_rate=sr,
-        sample_width=cropped.dtype.itemsize,
+        sample_width=wav.dtype.itemsize,
         channels=1,
     )
 
-    norm0 = pydub.effects.normalize(ch0, headroom=float(normalize_headroom_db))
-    norm1 = pydub.effects.normalize(ch1, headroom=float(normalize_headroom_db))
-    stereo = pydub.AudioSegment.from_mono_audiosegments(norm0, norm1)
+    norm_left = pydub.effects.normalize(seg_left, headroom=NORMALIZE_HEADROOM_DB)
+    norm_right = pydub.effects.normalize(seg_right, headroom=NORMALIZE_HEADROOM_DB)
+
+    stereo = pydub.AudioSegment.from_mono_audiosegments(norm_left, norm_right)
     stereo.export(dst_wav, format="wav")
