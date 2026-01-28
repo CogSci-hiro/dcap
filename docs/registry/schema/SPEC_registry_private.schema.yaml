@@ -1,0 +1,60 @@
+# Machine-readable specification for registry_private.tsv
+# Used for validation only. Does NOT contain data.
+
+version: 1
+type: table
+format: tsv
+encoding: utf-8
+
+primary_key: record_id
+
+columns:
+  record_id:
+    type: string
+    required: true
+    description: >
+      Stable run-level identifier. Must match exactly one record_id
+      in registry_public.
+    constraints:
+      - non_empty: true
+
+  dcap_id:
+    type: string
+    required: true
+    description: >
+      Identifier (initials or short name) of the reviewer/annotator.
+    constraints:
+      - non_empty: true
+
+  exclude_reason:
+    type: string
+    required: false
+    description: >
+      Free-text reason for exclusion or caution.
+      Use 'NA' or empty if not excluded.
+
+  review_date:
+    type: date
+    required: false
+    format: YYYY-MM-DD
+    description: >
+      Date on which this run was reviewed.
+
+  notes:
+    type: string
+    required: false
+    description: >
+      Arbitrary private notes. May contain sensitive information.
+
+rules:
+  - name: one_row_per_record
+    description: >
+      record_id must be unique across the file.
+
+  - name: no_structure_override
+    description: >
+      This file must not contain subject, session, task, run, or datatype columns.
+
+  - name: join_semantics
+    description: >
+      This file may only be joined to registry_public via record_id.
