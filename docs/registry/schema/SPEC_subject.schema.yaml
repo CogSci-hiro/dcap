@@ -1,0 +1,163 @@
+# Machine-readable specification for subject-level private metadata YAML
+# Used for validation only. Does NOT contain data.
+
+version: 1
+type: yaml_document
+privacy: private
+
+required_top_level_keys:
+  - subject
+  - dataset_id
+
+optional_top_level_keys:
+  - identity
+  - implantation
+  - acquisitions
+  - medication
+  - protocols
+  - notes
+
+constraints:
+  subject:
+    type: string
+    pattern: '^sub-\d{3}$'
+    description: BIDS subject identifier.
+
+  dataset_id:
+    type: string
+    description: Dataset identifier matching registry_public.dataset_id.
+
+sections:
+
+  identity:
+    type: object
+    optional_keys: [name, sex, date_of_birth]
+    fields:
+      name:
+        type: string
+        description: Private name / identifier (do not export).
+      sex:
+        type: enum
+        allowed: [male, female, other, unknown]
+      date_of_birth:
+        type: date
+        format: YYYY-MM-DD
+
+  implantation:
+    type: object
+    optional_keys: [electrode_type, manufacturer, contact_count, notes]
+    fields:
+      electrode_type:
+        type: string
+      manufacturer:
+        type: string
+      contact_count:
+        type: integer
+      notes:
+        type: string
+
+  acquisitions:
+    type: list
+    item_schema:
+      type: object
+      required_keys: [acquisition_id, date, session]
+      optional_keys: [place, notes]
+      fields:
+        acquisition_id:
+          type: string
+        date:
+          type: date
+          format: YYYY-MM-DD
+        session:
+          type: string
+          pattern: '^ses-[A-Za-z0-9]+$'
+        place:
+          type: string
+        notes:
+          type: string
+    rules:
+      - name: unique_acquisition_id
+        description: acquisition_id must be unique within a subject file.
+
+  medication:
+    type: list
+    item_schema:
+      type: object
+      required_keys: [start_date, drugs]
+      optional_keys: [end_date, notes]
+      fields:
+        start_date:
+          type: date
+          format: YYYY-MM-DD
+        end_date:
+          type: date
+          format: YYYY-MM-DD
+        drugs:
+          type: list
+          item_schema:
+            type: object
+            required_keys: [name]
+            optional_keys: [dose_mg, dose, unit]
+            fields:
+              name:
+                type: string
+              dose_mg:
+                type: number
+              dose:
+                type: number
+              unit:
+                type: string
+        notes:
+          type: string
+    rules:
+      - name: allow_overlaps_with_warning
+        description: >
+          Overlapping medication windows are allowed but should raise a warning in validation.
+
+  protocols:
+    type: list
+    item_schema:
+      type: object
+      required_keys: [protocol_id, task, sessions]
+      optional_keys: [setup, notes]
+      fields:
+        protocol_id:
+          type: string
+        task:
+          type: string
+        sessions:
+          type: list
+          item_schema:
+            type: string
+            pattern: '^ses-[A-Za-z0-9]+$'
+        setup:
+          type: string
+        notes:
+          type: string
+    rules:
+      - name: unique_protocol_id
+        description: protocol_id must be unique within a subject file.
+
+  notes:
+    type: list
+    item_schema:
+      type: object
+      optional_keys: [date, author, text]
+      fields:
+        date:
+          type: date
+          format: YYYY-MM-DD
+        author:
+          type: string
+        text:
+          type: string
+
+rules:
+  - name: no_run_level_records
+    description: >
+      This file must not contain run-level fields (task/run/datatype) as primary indexing.
+      Runs are linked indirectly via session and subject.
+
+  - name: private_only
+    description: >
+      This file must never be committed to Git and must never be exported without sanitization.

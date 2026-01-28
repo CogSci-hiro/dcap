@@ -1,0 +1,104 @@
+# Machine-readable specification for registry_public.tsv
+# Used for validation only. Does NOT contain data.
+
+version: 1
+type: table
+format: tsv
+encoding: utf-8
+
+primary_key: record_id
+
+columns:
+  dataset_id:
+    type: string
+    required: true
+    description: >
+      Short identifier for the dataset/site (must be stable).
+    constraints:
+      - non_empty: true
+
+  bids_root:
+    type: string
+    required: true
+    description: >
+      Path or logical identifier for the BIDS dataset root.
+      Must not include subject-identifying information.
+    constraints:
+      - non_empty: true
+
+  subject:
+    type: string
+    required: true
+    description: >
+      BIDS subject identifier (sub-XXX).
+    constraints:
+      - non_empty: true
+      - pattern: '^sub-\d{3}$'
+
+  session:
+    type: string
+    required: true
+    description: >
+      BIDS session identifier (e.g., ses-01).
+    constraints:
+      - non_empty: true
+      - pattern: '^ses-[A-Za-z0-9]+$'
+
+  task:
+    type: string
+    required: true
+    description: >
+      BIDS task name.
+    constraints:
+      - non_empty: true
+
+  run:
+    type: string
+    required: true
+    description: >
+      Run index stored as string (avoid 1 vs 01 ambiguity).
+    constraints:
+      - non_empty: true
+      - pattern: '^\d+$'
+
+  datatype:
+    type: string
+    required: true
+    description: >
+      BIDS datatype (e.g., ieeg, eeg, beh).
+    constraints:
+      - non_empty: true
+
+  record_id:
+    type: string
+    required: true
+    description: >
+      Stable unique identifier constructed as:
+      {dataset_id}|{subject}|{session}|{task}|{run}|{datatype}
+    constraints:
+      - non_empty: true
+
+optional_columns:
+  bids_relpath:
+    type: string
+    required: false
+    description: >
+      Relative path to the data file within bids_root (optional).
+  exists:
+    type: boolean
+    required: false
+    description: >
+      Whether the expected file(s) exist (optional).
+
+rules:
+  - name: one_row_per_record
+    description: >
+      record_id must be unique across the file.
+
+  - name: record_id_consistency
+    description: >
+      record_id must equal '{dataset_id}|{subject}|{session}|{task}|{run}|{datatype}'.
+
+  - name: privacy
+    description: >
+      This file must not contain direct identifiers (name, DOB, MRN), acquisition dates, medication, or free-text clinical notes.

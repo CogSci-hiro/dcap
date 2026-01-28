@@ -14,16 +14,16 @@ One `(dataset_id, subject, session, task, run, datatype)` tuple.
 
 ## Required columns
 
-| Column | Type | Description |
-|------|------|-------------|
-| dataset_id | str | Short identifier for dataset/site |
-| bids_root | str | Path or token for BIDS root |
-| subject | str | BIDS subject ID (`sub-XXX`) |
-| session | str | BIDS session ID (`ses-XX`) |
-| task | str | BIDS task name |
-| run | str | Run index (string, not int) |
-| datatype | str | BIDS datatype (`ieeg`, `beh`, etc.) |
-| record_id | str | Stable unique identifier |
+| Column     | Type | Description                         |
+|------------|------|-------------------------------------|
+| dataset_id | str  | Short identifier for dataset/site   |
+| bids_root  | str  | Path or token for BIDS root         |
+| subject    | str  | BIDS subject ID (`sub-XXX`)         |
+| session    | str  | BIDS session ID (`ses-XX`)          |
+| task       | str  | BIDS task name                      |
+| run        | str  | Run index (string, not int)         |
+| datatype   | str  | BIDS datatype (`ieeg`, `beh`, etc.) |
+| record_id  | str  | Stable unique identifier            |
 
 ## record_id format
 ```

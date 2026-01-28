@@ -1,0 +1,74 @@
+# =============================================================================
+# Subject-level private metadata (PRIVATE)
+#
+# WARNING:
+# - Contains sensitive information.
+# - DO NOT commit to Git.
+# - Must live under $DCAP_PRIVATE_ROOT/subjects/.
+#
+# Purpose:
+# - Store subject-centric identity, acquisition history, medication,
+#   and protocol context.
+# - Designed for manual editing.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Required identifiers
+# ---------------------------------------------------------------------------
+subject: sub-001          # BIDS subject ID
+dataset_id: example_dataset
+
+# ---------------------------------------------------------------------------
+# 1. Stable identity (subject-level)
+# ---------------------------------------------------------------------------
+identity:
+  name: ""                # Private (optional)
+  sex: unknown            # male | female | other | unknown
+  date_of_birth: ""       # YYYY-MM-DD (private)
+
+# ---------------------------------------------------------------------------
+# 2. Implantation / hardware
+# ---------------------------------------------------------------------------
+implantation:
+  electrode_type: ""      # e.g., sEEG, ECoG
+  manufacturer: ""
+  notes: ""
+
+# ---------------------------------------------------------------------------
+# 3. Acquisition events (repeatable)
+# ---------------------------------------------------------------------------
+acquisitions:
+  - acquisition_id: A1
+    date: ""              # YYYY-MM-DD
+    place: ""             # Acquisition site (private)
+    session: ses-01
+    notes: ""
+
+# ---------------------------------------------------------------------------
+# 4. Medication history (repeatable, time-indexed)
+# ---------------------------------------------------------------------------
+medication:
+  - start_date: ""        # YYYY-MM-DD
+    end_date: ""          # YYYY-MM-DD (optional)
+    drugs:
+      - name: ""
+        dose_mg: ""
+    notes: ""
+
+# ---------------------------------------------------------------------------
+# 5. Experimental protocols (repeatable)
+# ---------------------------------------------------------------------------
+protocols:
+  - protocol_id: proto_01
+    task: conversation
+    sessions: [ses-01]
+    setup: ""
+    notes: ""
+
+# ---------------------------------------------------------------------------
+# 6. Free annotations (optional)
+# ---------------------------------------------------------------------------
+notes:
+  - date: ""              # YYYY-MM-DD
+    author: ""
+    text: ""

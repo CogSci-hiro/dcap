@@ -1,0 +1,62 @@
+# Machine-readable specification for subject_keys.yaml
+# Used for validation only. Does NOT contain data.
+
+version: 1
+type: yaml_mapping
+privacy: highly_sensitive
+
+required_top_level_keys:
+  - version
+  - datasets
+
+optional_top_level_keys:
+  - notes
+
+datasets:
+  key_semantics: >
+    Each key under 'datasets' is a dataset_id and must match dataset_id used in registry_public.
+
+entry_schema:
+  type: object
+  required_keys:
+    - bids_subject
+    - local_subject_id
+  optional_keys:
+    - site
+    - implant_date
+    - notes
+  fields:
+    bids_subject:
+      type: string
+      description: BIDS subject identifier (sub-XXX).
+      constraints:
+        - non_empty: true
+        - pattern: '^sub-\d{3}$'
+    local_subject_id:
+      type: string
+      description: Local clinical identifier (e.g., MRN or hospital code).
+      constraints:
+        - non_empty: true
+    site:
+      type: string
+      description: Optional site/center label.
+    implant_date:
+      type: date
+      format: YYYY-MM-DD
+      description: Optional implant date (private).
+    notes:
+      type: string
+      description: Optional sensitive notes (private).
+
+rules:
+  - name: uniqueness_within_dataset
+    description: >
+      bids_subject must be unique within each dataset_id list.
+
+  - name: non_exportable
+    description: >
+      This file must never be sanitized or exported; it must never be merged into registry views.
+
+  - name: no_repo_storage
+    description: >
+      subject_keys.yaml must live under $DCAP_PRIVATE_ROOT and must not be committed to Git.

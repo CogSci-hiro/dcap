@@ -30,10 +30,10 @@ This file is designed to be **manually editable** (e.g. in a spreadsheet editor)
 
 ## Canonical template
 
-```
-record_id	dcap_id	exclude_reason	review_date	notes
-001	JoDo	NA	2000-01-01	example
-```
+| record_id | dcap_id | exclude_reason | review_date | notes   |
+|-----------|---------|----------------|-------------|---------|
+| 001       | JoDo    | NA             | 2000-01-01  | example |
+
 
 ---
 

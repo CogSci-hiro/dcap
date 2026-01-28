@@ -1,0 +1,39 @@
+# =============================================================================
+# Subject re-identification map (PRIVATE)
+#
+# WARNING:
+# - Contains sensitive identifiers.
+# - DO NOT commit to Git.
+# - Must live under $DCAP_PRIVATE_ROOT.
+#
+# Purpose:
+# - Map anonymized BIDS subject IDs (sub-XXX) to local clinical identifiers.
+# - Used only for raw data handling and internal audits.
+# - Never merged into registries or analysis views.
+# =============================================================================
+
+version: 1
+
+# Optional free-text notes about this mapping file
+notes: ""
+
+datasets:
+  # ---------------------------------------------------------------------------
+  # Dataset identifier (must match dataset_id used in registry_public)
+  # ---------------------------------------------------------------------------
+  example_dataset:
+
+    # One entry per subject
+    - bids_subject: sub-001
+      dcap_id: JoDo
+
+      # Optional fields (add only if needed)
+      site: ""
+      implant_date: ""
+      notes: ""
+
+    # - bids_subject: sub-002
+    #   dcap_id: HiYa
+    #   site: ""
+    #   implant_date: ""
+    #   notes: ""
