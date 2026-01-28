@@ -1,25 +1,53 @@
+# src/dcap/bids/core/transforms.py
 # =============================================================================
-#                          BIDS: Raw transforms
+#                         BIDS Core: Raw transforms
 # =============================================================================
 #
-# Apply channel renaming/types and montage. Keep each transform small and testable.
+# Task-agnostic transforms that are broadly reusable across tasks.
+#
+# Scope
+# -----
+# - Set mandatory BIDS fields (e.g., line frequency)
+# - Apply channel renaming maps
+# - Apply channel type maps
+# - Provide small, safe utilities around channel selection
+#
+# Non-goals
+# ---------
+# - Task-specific channel policies (e.g., "drop NULL electrodes") belong in tasks
+# - Atlas/montage construction belongs in tasks (or a shared non-core module),
+#   because assumptions vary heavily across tasks/datasets.
 #
 # REVIEW
 # =============================================================================
+# Imports
+# =============================================================================
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Iterable, Mapping, Optional, Sequence
 
 import mne
 import pandas as pd
 
-# You already have these in your older project; wire them in here when ready.
-# from dcap.electrodes import get_mni_mono_coordinates, get_montage
 
+# =============================================================================
+# Mandatory / common metadata
+# =============================================================================
 
 def apply_line_frequency(raw: mne.io.BaseRaw, line_freq_hz: float) -> None:
     """
-    Set required line frequency in-place.
+    Set the line frequency (Hz) in-place.
+
+    Parameters
+    ----------
+    raw
+        Raw object to modify.
+    line_freq_hz
+        Power line frequency (e.g., 50 in EU, 60 in US).
+
+    Returns
+    -------
+    None
 
     Usage example
     -------------
@@ -28,9 +56,48 @@ def apply_line_frequency(raw: mne.io.BaseRaw, line_freq_hz: float) -> None:
     raw.info["line_freq"] = float(line_freq_hz)
 
 
-def apply_channel_renaming_from_tsv(raw: mne.io.BaseRaw, channels_tsv: Path, subject: str) -> None:
+# =============================================================================
+# Channel renaming
+# =============================================================================
+
+def apply_channel_renaming(raw: mne.io.BaseRaw, mapping: Mapping[str, str]) -> None:
     """
-    Rename channels using a TSV mapping file filtered by subject.
+    Rename channels in-place.
+
+    Parameters
+    ----------
+    raw
+        Raw object to modify.
+    mapping
+        Dict-like mapping {old_name: new_name}.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - Only keys present in raw.ch_names will be applied.
+    - MNE will raise if the renaming produces duplicate channel names.
+
+    Usage example
+    -------------
+        apply_channel_renaming(raw, {"A1": "A01", "A2": "A02"})
+    """
+    if not mapping:
+        return
+
+    existing = set(raw.ch_names)
+    filtered: Dict[str, str] = {k: v for k, v in mapping.items() if k in existing}
+    if not filtered:
+        return
+
+    raw.rename_channels(filtered)
+
+
+def load_channel_rename_mapping_from_tsv(channels_tsv: Path, subject: str) -> Dict[str, str]:
+    """
+    Load a channel rename mapping from a TSV file, filtered by subject.
 
     Expected columns
     ----------------
@@ -40,16 +107,15 @@ def apply_channel_renaming_from_tsv(raw: mne.io.BaseRaw, channels_tsv: Path, sub
 
     Parameters
     ----------
-    raw
-        Raw object to rename in-place.
     channels_tsv
-        TSV file path.
+        TSV path.
     subject
-        BIDS subject label used in the TSV "subject" column.
+        Subject identifier as stored in the TSV (typically BIDS subject label).
 
     Returns
     -------
-    None
+    Dict[str, str]
+        Rename mapping {old: new}. May be empty if no rows match.
 
     Example TSV format
     ------------------
@@ -62,47 +128,122 @@ def apply_channel_renaming_from_tsv(raw: mne.io.BaseRaw, channels_tsv: Path, sub
 
     Usage example
     -------------
-        apply_channel_renaming_from_tsv(raw, Path("channels.tsv"), subject="NicEle")
+        mapping = load_channel_rename_mapping_from_tsv(Path("channels.tsv"), subject="NicEle")
+        apply_channel_renaming(raw, mapping)
     """
     df = pd.read_csv(channels_tsv, sep="\t")
     df_sub = df[df["subject"].astype(str) == str(subject)]
 
-    mapping: Dict[str, str] = dict(zip(df_sub["old"].astype(str), df_sub["new"].astype(str)))
-    if mapping:
-        raw.rename_channels(mapping)
+    mapping: Dict[str, str] = {}
+    for old, new in zip(df_sub["old"].astype(str), df_sub["new"].astype(str)):
+        mapping[old] = new
+    return mapping
 
 
-def apply_channel_types_default_seeg(raw: mne.io.BaseRaw, ecg_channel_name: str = "ECG") -> None:
+# =============================================================================
+# Channel types
+# =============================================================================
+
+def apply_channel_types(raw: mne.io.BaseRaw, mapping: Mapping[str, str]) -> None:
     """
-    Default channel type assignment for sEEG: set all to 'seeg' except ECG.
+    Apply channel types in-place.
 
-    Usage example
-    -------------
-        apply_channel_types_default_seeg(raw, ecg_channel_name="ECG")
-    """
-    mapping: Dict[str, str] = {ch: "seeg" for ch in raw.ch_names}
-    if ecg_channel_name in mapping:
-        mapping[ecg_channel_name] = "ecg"
-    raw.set_channel_types(mapping)
+    Parameters
+    ----------
+    raw
+        Raw object to modify.
+    mapping
+        Mapping {channel_name: mne_type}, e.g. {"ECG": "ecg", "A01": "seeg"}.
 
-
-def apply_montage_from_atlas(raw: mne.io.BaseRaw, atlas_path: Path) -> None:
-    """
-    Apply monopolar montage using an atlas file (placeholder).
+    Returns
+    -------
+    None
 
     Notes
     -----
-    This is intentionally a stub in the skeleton: wire in your existing
-    `get_mni_mono_coordinates()` + `get_montage()` here.
+    - Unknown channel names are ignored.
+    - Channel types must be valid MNE channel type strings.
 
     Usage example
     -------------
-        apply_montage_from_atlas(raw, Path("elec2atlas.mat"))
+        apply_channel_types(raw, {"ECG": "ecg"})
     """
-    _ = atlas_path
-    # TODO: implement using your existing pipeline:
-    # atlas = mat73.loadmat(atlas_path)
-    # mni_coords = get_mni_mono_coordinates(atlas)
-    # montage, _, _ = get_montage(raw, mni_coords, montage_type="monopolar")
-    # raw.set_montage(montage)
-    return
+    if not mapping:
+        return
+
+    existing = set(raw.ch_names)
+    filtered: Dict[str, str] = {k: v for k, v in mapping.items() if k in existing}
+    if not filtered:
+        return
+
+    raw.set_channel_types(filtered)
+
+
+def build_default_seeg_channel_types(
+    channel_names: Sequence[str],
+    ecg_channel_name: str = "ECG",
+) -> Dict[str, str]:
+    """
+    Build a conservative default channel-type mapping for sEEG.
+
+    Parameters
+    ----------
+    channel_names
+        Channel names to type.
+    ecg_channel_name
+        If present, set this channel to "ecg" and all others to "seeg".
+
+    Returns
+    -------
+    Dict[str, str]
+        Mapping {ch: type}.
+
+    Usage example
+    -------------
+        types = build_default_seeg_channel_types(raw.ch_names, ecg_channel_name="ECG")
+        apply_channel_types(raw, types)
+    """
+    mapping: Dict[str, str] = {str(ch): "seeg" for ch in channel_names}
+    if ecg_channel_name in mapping:
+        mapping[ecg_channel_name] = "ecg"
+    return mapping
+
+
+# =============================================================================
+# Channel selection helpers (safe, task-agnostic)
+# =============================================================================
+
+def pick_channels_present(raw: mne.io.BaseRaw, keep: Iterable[str]) -> list[str]:
+    """
+    Return channel names in `keep` that are present in `raw`, preserving order.
+
+    Usage example
+    -------------
+        picks = pick_channels_present(raw, ["ECG", "A01", "A02"])
+    """
+    existing = set(raw.ch_names)
+    return [ch for ch in keep if ch in existing]
+
+
+def drop_channels_if_present(raw: mne.io.BaseRaw, drop: Iterable[str]) -> None:
+    """
+    Drop channels if they exist. No error if they do not.
+
+    Parameters
+    ----------
+    raw
+        Raw object to modify.
+    drop
+        Iterable of channel names to drop.
+
+    Returns
+    -------
+    None
+
+    Usage example
+    -------------
+        drop_channels_if_present(raw, ["TRIG", "DC01"])
+    """
+    to_drop = [ch for ch in drop if ch in raw.ch_names]
+    if to_drop:
+        raw.drop_channels(to_drop)
