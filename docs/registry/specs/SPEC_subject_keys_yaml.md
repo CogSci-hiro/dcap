@@ -13,7 +13,7 @@ Top-level mapping by dataset_id.
 
 ## Required fields per entry
 - bids_subject
-- local_subject_id
+- dcap_id
 
 ## Optional fields
 - site
