@@ -24,6 +24,7 @@ from dcap.cli.cli_types import CliCommand
 from dcap.cli.commands import registry as cmd_registry
 from dcap.cli.commands import bids_anat as cmd_bids_anat
 from dcap.cli.commands import bids_convert as cmd_bids_convert
+from dcap.cli.commands.viz import report as cmd_report
 
 
 # =============================================================================
@@ -31,10 +32,10 @@ from dcap.cli.commands import bids_convert as cmd_bids_convert
 # =============================================================================
 
 _COMMANDS: Dict[str, CliCommand] = {
-    # "bids-convert": cmd_bids_convert,
     "registry": cmd_registry,
     "bids-anat": cmd_bids_anat,
-    "bids-convert": cmd_bids_convert
+    "bids-convert": cmd_bids_convert,
+    "report": cmd_report
 }
 
 
