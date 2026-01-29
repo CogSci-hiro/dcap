@@ -22,6 +22,7 @@ from dcap.cli.types import CliCommand
 
 # from dcap.cli.commands import bids_convert as cmd_bids_convert
 from dcap.cli.commands import registry as cmd_registry
+from dcap.cli.commands import bids as cmd_bids
 
 
 # =============================================================================
@@ -31,6 +32,7 @@ from dcap.cli.commands import registry as cmd_registry
 _COMMANDS: Dict[str, CliCommand] = {
     # "bids-convert": cmd_bids_convert,
     "registry": cmd_registry,
+    "bids": cmd_bids
 }
 
 
