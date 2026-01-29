@@ -101,18 +101,21 @@ class AnatWriteConfig:
 # =============================================================================
 
 def _resolve_t1_path(cfg: AnatWriteConfig) -> Path:
+    """Prefer explicitly provided T1 path; otherwise fall back to default FreeSurfer location"""
     if cfg.t1_mgz_path is not None:
         return cfg.t1_mgz_path
     return cfg.subjects_dir / cfg.original_id / DEFAULT_T1_MGZ_RELATIVE
 
 
 def _resolve_elec_recon_dir(cfg: AnatWriteConfig) -> Path:
+    """Prefer explicitly provided electrode reconstruction directory; otherwise use default layout"""
     if cfg.elec_recon_dir is not None:
         return cfg.elec_recon_dir
     return cfg.subjects_dir / cfg.original_id / DEFAULT_ELEC_RECON_RELATIVE
 
 
 def _bids_anat_path(cfg: AnatWriteConfig) -> BIDSPath:
+    """Construct BIDS T1w anatomical path from config"""
     return BIDSPath(
         root=cfg.bids_root,
         subject=cfg.bids_subject,
