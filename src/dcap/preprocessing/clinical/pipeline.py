@@ -27,6 +27,8 @@ from dcap.preprocessing.configs import (
     CoordinatesConfig,
     GammaEnvelopeConfig,
 )
+from dcap.preprocessing.clinical.configs import ClinicalAnalysisConfig
+from dcap.preprocessing.clinical.policy import choose_analysis_view
 from dcap.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.preprocessing.types import PreprocContext
 from dcap.analysis.trf.contracts import TRFConfig, TRFInput, TRFResult
@@ -39,7 +41,6 @@ class ClinicalAnalysisConfig:
     analysis_view: AnalysisView = "original"
 
 
-
 def run_clinical_analysis(
     *,
     raw: mne.io.BaseRaw,
@@ -47,6 +48,7 @@ def run_clinical_analysis(
     session_id: Optional[str],
     run_id: Optional[str],
     preproc_cfg: ClinicalPreprocConfig,
+    analysis_cfg: Optional[ClinicalAnalysisConfig] = None,
     electrodes_table: Optional[Mapping[str, Sequence[float]]] = None,
     coords_cfg: Optional[CoordinatesConfig] = None,
     envelope_cfg: Optional[GammaEnvelopeConfig] = None,
@@ -67,6 +69,8 @@ def run_clinical_analysis(
         Identifiers used in reporting.
     preproc_cfg
         Clinical preprocessing configuration.
+    analysis_cfg
+
     electrodes_table, coords_cfg
         Optional coordinate attachment inputs.
     envelope_cfg
@@ -114,11 +118,10 @@ def run_clinical_analysis(
     envelopes = None
 
     if envelope_cfg is not None:
-        # Default: prefer CAR if present, else original.
-        if "car" in preproc_result.views:
-            envelope_source_raw = preproc_result.views["car"]
-        else:
-            envelope_source_raw = preproc_result.views["original"]
+        view_used, envelope_source_raw = choose_analysis_view(
+            raw_views=preproc_result.views,
+            requested=analysis_cfg.analysis_view,
+        )
 
         env_raw, env_artifact = compute_gamma_envelope(
             raw=envelope_source_raw,
@@ -128,6 +131,27 @@ def run_clinical_analysis(
 
         artifacts.append(env_artifact)
         envelopes = {"gamma": env_raw}
+
+        preproc_result.ctx.decisions["analysis_view_requested"] = analysis_cfg.analysis_view
+        preproc_result.ctx.decisions["analysis_view_used"] = view_used
+    if envelope_cfg is not None:
+        view_used, envelope_source_raw = choose_analysis_view(
+            raw_views=preproc_result.views,
+            requested=analysis_cfg.analysis_view,
+        )
+
+        env_raw, env_artifact = compute_gamma_envelope(
+            raw=envelope_source_raw,
+            cfg=envelope_cfg,
+            ctx=preproc_result.ctx,
+        )
+
+        artifacts.append(env_artifact)
+        envelopes = {"gamma": env_raw}
+
+        # Make the choice visible to reporting (two good places to store it)
+        preproc_result.ctx.decisions["analysis_view_requested"] = analysis_cfg.analysis_view
+        preproc_result.ctx.decisions["analysis_view_used"] = view_used
 
     trf_result: Optional[TRFResult] = None
 
