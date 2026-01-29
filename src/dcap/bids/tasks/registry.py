@@ -74,12 +74,19 @@ def get_task_factories() -> Mapping[str, TaskFactory]:
         stim_wav = ctx.task_assets_dir / "beeps_pre-task-1-sec_post-task-4-sec.wav"
         atlas_path = ctx.task_assets_dir / "elec2atlas.mat"
 
-        return DiapixTask(
-            subject_bids=ctx.subject,
-            audio_onsets_tsv=audio_onsets_tsv,
-            stim_wav=stim_wav,
-            atlas_path=atlas_path,
+        task = resolve_task(
+            TaskFactoryContext(
+                task_name="diapix",
+                dataset_id=ctx.dataset_id,
+                bids_subject=ctx.bids_subject,
+                session=ctx.session,
+                private_root=ctx.private_root,
+                subject_map_yaml=ctx.subject_map_yaml,
+                task_assets_dir=ctx.task_assets_dir,
+            )
         )
+
+        return task
 
     return {
         "diapix": make_diapix,
@@ -136,14 +143,19 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
         stim_wav = task_assets_dir / "beeps_pre-task-1-sec_post-task-4-sec.wav"
         atlas_path = task_assets_dir / "elec2atlas.mat"
 
-        return DiapixTask(
-            bids_subject=ctx.bids_subject,
-            dcap_id=dcap_id,
-            session=ctx.session,
-            audio_onsets_tsv=audio_onsets_tsv,
-            stim_wav=stim_wav,
-            atlas_path=atlas_path,
+        task = resolve_task(
+            TaskFactoryContext(
+                task_name="diapix",
+                dataset_id=ctx.dataset_id,
+                bids_subject=ctx.bids_subject,
+                session=ctx.session,
+                private_root=ctx.private_root,
+                subject_map_yaml=ctx.subject_map_yaml,
+                task_assets_dir=ctx.task_assets_dir,
+            )
         )
+
+        return task
 
     return {
         "diapix": make_diapix,

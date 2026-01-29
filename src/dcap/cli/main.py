@@ -18,7 +18,7 @@
 import argparse
 from typing import Dict, Sequence
 
-from dcap.cli.types import CliCommand
+from dcap.cli.cli_types import CliCommand
 
 # from dcap.cli.commands import bids_convert as cmd_bids_convert
 from dcap.cli.commands import registry as cmd_registry

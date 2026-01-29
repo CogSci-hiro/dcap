@@ -1,18 +1,22 @@
+# dcap/bids/tasks/__init__.py
 # =============================================================================
-#                           BIDS: Task registry
+#                         DCAP: BIDS tasks package
+# =============================================================================
+#
+# IMPORTANT:
+# - Do NOT instantiate tasks at import time.
+# - Tasks require runtime context (private mapping, assets, etc.).
+# - Use dcap.bids.tasks.registry.resolve_task(...) instead.
+#
 # =============================================================================
 
-from dcap.bids.tasks.base import BidsTask
-from dcap.bids.tasks.diapix.task import DiapixTask
+from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
+from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
 
-
-_TASKS: dict[str, BidsTask] = {
-    "diapix": DiapixTask(),
-}
-
-
-def get_task(name: str) -> BidsTask:
-    key = str(name).strip().lower()
-    if key not in _TASKS:
-        raise ValueError(f"Unknown task '{name}'. Available: {sorted(_TASKS)}")
-    return _TASKS[key]
+__all__ = [
+    "BidsTask",
+    "PreparedEvents",
+    "RecordingUnit",
+    "TaskFactoryContext",
+    "resolve_task",
+]
