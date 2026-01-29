@@ -16,8 +16,6 @@
 #
 # =============================================================================
 
-from __future__ import annotations  # NOTE: remove if you prefer; see type hints below.
-
 import re
 from dataclasses import asdict
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
