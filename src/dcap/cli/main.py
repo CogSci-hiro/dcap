@@ -8,9 +8,7 @@
 # - parse global + subcommand arguments
 # - call a single library function per subcommand
 #
-# Scientific / BIDS logic must live in `dcap.*`, not here.
 #
-# REVIEW
 # =============================================================================
 # Imports
 # =============================================================================
@@ -58,7 +56,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="dcap",
-        description="DCAP: sEEG data selection",
+        description="DCAP: sEEG data processing",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
