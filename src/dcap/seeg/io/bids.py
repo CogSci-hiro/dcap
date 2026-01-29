@@ -18,8 +18,11 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
+import mne
+from mne_bids import BIDSPath
 import pandas as pd
 
 
@@ -62,7 +65,7 @@ class BidsRunSpec:
 def _strip_prefix(value: Optional[str], prefix: str) -> Optional[str]:
     if value is None:
         return None
-    return value[len(prefix) :] if value.startswith(prefix) else value
+    return value[len(prefix):] if value.startswith(prefix) else value
 
 
 def _normalize_bids_ids(
@@ -84,6 +87,69 @@ def _normalize_bids_ids(
         run_id_norm = run_str
 
     return subject_id_norm, session_id_norm, task_norm, run_id_norm
+
+
+def _discover_runs_with_extensions(
+    *,
+    bids_root: Path,
+    subject: str,
+    session: Optional[str],
+    task: str,
+) -> dict[str, str]:
+    """
+    Discover available runs and pick a preferred loadable extension per run.
+
+    We prefer "entrypoint" files that MNE can read directly:
+    - BrainVision: .vhdr (preferred), not .eeg/.vmrk
+    - EDF: .edf
+    - BDF: .bdf
+    - EEGLAB: .set
+    - FIF: .fif
+    """
+    subj_dir = bids_root / subject
+    ieeg_dir = (subj_dir / "ieeg") if session is None else (subj_dir / session / "ieeg")
+    if not ieeg_dir.exists():
+        return {}
+
+    # Priority order: pick the first one that exists for each run
+    preferred_exts = [".vhdr", ".edf", ".bdf", ".set", ".fif"]
+
+    # Gather all candidate files that look like recordings (not JSON/TSV)
+    pattern = f"{subject}_task-{task}_run-*_ieeg*"
+    candidates = [p for p in ieeg_dir.glob(pattern) if p.is_file()]
+
+    run_to_exts: dict[str, set[str]] = {}
+    for fp in candidates:
+        m = re.search(r"_run-(?P<run>[^_]+)_ieeg", fp.name)
+        if m is None:
+            continue
+        run = m.group("run")
+        ext = fp.suffix.lower()
+
+        # Skip obvious sidecars
+        if ext in {".json", ".tsv", ".gz"}:
+            continue
+
+        run_to_exts.setdefault(run, set()).add(ext)
+
+    # Choose preferred extension per run
+    run_to_pref: dict[str, str] = {}
+    for run, exts in run_to_exts.items():
+        chosen = None
+        for ext in preferred_exts:
+            if ext in exts:
+                chosen = ext
+                break
+
+        # If we only see BrainVision data (.eeg) but no header (.vhdr), that's suspicious.
+        if chosen is None:
+            # fall back to any extension we saw, but keep it stable
+            chosen = sorted(exts)[0]
+
+        run_to_pref[run] = chosen
+
+    return dict(sorted(run_to_pref.items(), key=lambda kv: kv[0]))
+
 
 
 def load_bids_run(
@@ -128,6 +194,26 @@ def load_bids_run(
         run_id=run_id,
     )
 
+    run_to_ext = _discover_runs_with_extensions(
+        bids_root=Path(bids_root),
+        subject=subject_id_norm,
+        session=session_id_norm,
+        task=task_norm,
+    )
+
+    if run_id_norm is None:
+        if len(run_to_ext) == 1:
+            run_id_norm = next(iter(run_to_ext.keys()))
+        elif len(run_to_ext) > 1:
+            pretty = [f"run-{r}:{ext}" for r, ext in run_to_ext.items()]
+            raise ValueError(
+                "Multiple runs exist for this subject/task. Please specify --run. "
+                f"Available: {pretty}"
+            )
+
+    # If we know the preferred extension for the selected run, pass it to BIDSPath
+    extension = run_to_ext.get(run_id_norm, None)
+
     try:
         import mne  # noqa: F401
         from mne_bids import BIDSPath, read_raw_bids
@@ -143,6 +229,7 @@ def load_bids_run(
         task=task_norm,
         run=run_id_norm,
         datatype="ieeg",
+        extension=extension,
     )
 
     raw = read_raw_bids(bids_path=bids_path, verbose=False)
@@ -206,7 +293,7 @@ def _load_electrodes_table_from_bids(*, bids_path: "BIDSPath") -> Optional[Mappi
         name = str(row["name"])
         try:
             x, y, z = float(row["x"]), float(row["y"]), float(row["z"])
-        except Exception:
+        except Exception:  # noqa
             continue
         table[name] = (x, y, z)
 
