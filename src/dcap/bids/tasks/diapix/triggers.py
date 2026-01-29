@@ -7,8 +7,7 @@ _TRIGGER_ID_MAP: dict[str, dict[str, int]] = {
         "3": 10006,
         "4": 10005,
     },
-    "NicEle": {
-        "1": 20001,
-        "2": 20001,
+    "Nic-Ele": {
+        "1": 10005,
     },
 }
