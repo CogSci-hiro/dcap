@@ -1,43 +1,19 @@
-# =============================================================================
-# =============================================================================
-#                       #####################################
-#                       #   CLINICAL ANALYSIS ORCHESTRATOR  #
-#                       #####################################
-# =============================================================================
-# =============================================================================
-#
-# Composition layer:
-# BIDS IO (outside) -> preprocessing -> optional envelope -> optional TRF -> bundle
-#
-# Logic only:
-# - No file I/O
-# - No CLI / printing
-#
-# =============================================================================
-
-from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import mne
 
 from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle, ClinicalAnalysisNotes
+from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
+from dcap.seeg.clinical.policy import choose_analysis_view
 from dcap.seeg.preprocessing.blocks.filtering import compute_gamma_envelope
 from dcap.seeg.preprocessing.configs import (
     ClinicalPreprocConfig,
     CoordinatesConfig,
     GammaEnvelopeConfig,
 )
-from dcap.seeg.clinical.policy import choose_analysis_view
 from dcap.seeg.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.seeg.preprocessing.types import PreprocContext
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
-
-
-AnalysisView = Literal["original", "car", "bipolar", "laplacian", "wm_ref"]
-
-@dataclass(frozen=True)
-class ClinicalAnalysisConfig:
-    analysis_view: AnalysisView = "original"
 
 
 def run_clinical_analysis(
@@ -57,58 +33,15 @@ def run_clinical_analysis(
     ctx: Optional[PreprocContext] = None,
     trf_runner: Optional[Any] = None,
 ) -> ClinicalAnalysisBundle:
-    """
-    Run a clinical analysis composition pipeline and return a report-ready bundle.
-
-    Parameters
-    ----------
-    raw
-        Loaded Raw object (from BIDS IO layer).
-    subject_id, session_id, run_id
-        Identifiers used in reporting.
-    preproc_cfg
-        Clinical preprocessing configuration.
-    analysis_cfg
-
-    electrodes_table, coords_cfg
-        Optional coordinate attachment inputs.
-    envelope_cfg
-        Optional gamma envelope configuration. If provided, a "gamma" envelope Raw is produced.
-    trf_cfg
-        Optional TRF configuration. If provided, TRF computation is attempted using `trf_runner`.
-    events_df
-        Optional events table needed for TRF. Required if trf_cfg is provided.
-    notes
-        Optional key-value notes for reporting.
-    ctx
-        Optional existing PreprocContext.
-    trf_runner
-        Optional callable: (TRFInput, TRFConfig) -> TRFResult. If None and trf_cfg is provided,
-        a NotImplementedError is raised.
-
-    Returns
-    -------
-    bundle
-        ClinicalAnalysisBundle consumed by reporting.
-
-    Usage example
-    -------------
-        bundle = run_clinical_analysis(
-            raw=raw,
-            subject_id="sub-001",
-            session_id="ses-01",
-            run_id="run-1",
-            preproc_cfg=ClinicalPreprocConfig(),
-            envelope_cfg=GammaEnvelopeConfig(),
-        )
-    """
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("run_clinical_analysis expects an mne.io.BaseRaw.")
 
+    analysis_cfg_final = analysis_cfg if analysis_cfg is not None else ClinicalAnalysisConfig()
+
     preproc_result = run_clinical_preproc(
         raw=raw,
-        electrodes_table=electrodes_table,
         cfg=preproc_cfg,
+        electrodes_table=electrodes_table,
         coords_cfg=coords_cfg,
         ctx=ctx,
     )
@@ -119,7 +52,7 @@ def run_clinical_analysis(
     if envelope_cfg is not None:
         view_used, envelope_source_raw = choose_analysis_view(
             raw_views=preproc_result.views,
-            requested=analysis_cfg.analysis_view,
+            requested=analysis_cfg_final.analysis_view,
         )
 
         env_raw, env_artifact = compute_gamma_envelope(
@@ -127,33 +60,13 @@ def run_clinical_analysis(
             cfg=envelope_cfg,
             ctx=preproc_result.ctx,
         )
-
         artifacts.append(env_artifact)
         envelopes = {"gamma": env_raw}
 
-        preproc_result.ctx.decisions["analysis_view_requested"] = analysis_cfg.analysis_view
-        preproc_result.ctx.decisions["analysis_view_used"] = view_used
-    if envelope_cfg is not None:
-        view_used, envelope_source_raw = choose_analysis_view(
-            raw_views=preproc_result.views,
-            requested=analysis_cfg.analysis_view,
-        )
-
-        env_raw, env_artifact = compute_gamma_envelope(
-            raw=envelope_source_raw,
-            cfg=envelope_cfg,
-            ctx=preproc_result.ctx,
-        )
-
-        artifacts.append(env_artifact)
-        envelopes = {"gamma": env_raw}
-
-        # Make the choice visible to reporting (two good places to store it)
-        preproc_result.ctx.decisions["analysis_view_requested"] = analysis_cfg.analysis_view
+        preproc_result.ctx.decisions["analysis_view_requested"] = analysis_cfg_final.analysis_view
         preproc_result.ctx.decisions["analysis_view_used"] = view_used
 
     trf_result: Optional[TRFResult] = None
-
     if trf_cfg is not None:
         if events_df is None:
             raise ValueError("events_df must be provided when trf_cfg is provided.")
@@ -161,7 +74,6 @@ def run_clinical_analysis(
             raise ValueError("Gamma envelope must be computed when trf_cfg is provided.")
         if trf_runner is None:
             raise NotImplementedError("TRF requested but no trf_runner was provided.")
-
         trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
         trf_result = trf_runner(trf_input, trf_cfg)
 

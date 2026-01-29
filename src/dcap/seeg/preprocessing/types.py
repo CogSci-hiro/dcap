@@ -1,185 +1,124 @@
 # =============================================================================
-#                          ############################
-#                          #    PREPROCESSING TYPES   #
-#                          ############################
 # =============================================================================
-#
-# Shared dataclasses and small utilities for preprocessing blocks and pipelines.
-#
-# Design rules
-# - Logic only (no CLI, no file I/O, no printing).
-# - JSON-serializable artifacts for reporting/auditing.
-# - A single provenance ledger appended by each block/pipeline.
-#
+#                     ########################################
+#                     #       PREPROCESSING CORE TYPES       #
+#                     ########################################
+# =============================================================================
 # =============================================================================
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
+
+import mne
 
 
 @dataclass(frozen=True)
-class ProcRecord:
-    """
-    A single preprocessing step applied to a Raw object.
-
-    Parameters
-    ----------
-    block_name
-        Name of the block or pipeline step, e.g. "line_noise" or "rereference".
-    parameters
-        JSON-serializable parameters used for this step.
-    created_utc
-        UTC timestamp in ISO format.
-
-    Usage example
-    -------------
-        record = ProcRecord(
-            block_name="resample",
-            parameters={"sfreq_out": 512.0},
-            created_utc="2026-01-29T12:00:00Z",
-        )
-    """
-
-    block_name: str
-    parameters: Dict[str, Any]
-    created_utc: str
-
-
-@dataclass
 class BlockArtifact:
     """
-    JSON-serializable record produced by a preprocessing block or pipeline.
+    Artifact emitted by a preprocessing block.
 
-    Notes
-    -----
-    This is intended for downstream reporting and auditing.
+    Attributes
+    ----------
+    name
+        Block name (e.g., "line_noise").
+    parameters
+        Serialized parameters for provenance (dataclasses.asdict-friendly).
+    summary_metrics
+        Small scalar metrics for reporting/QC.
+    warnings
+        Human-readable warnings to surface in clinical reports.
+    figures
+        Paths or opaque figure handles (logic-only; rendering decides what to do).
 
     Usage example
     -------------
         artifact = BlockArtifact(
-            name="line_noise",
-            parameters={"method": "notch", "freq_base": 50},
-            summary_metrics={"line_ratio_reduction_mean": 0.42},
-            warnings=["zapline not enabled; notch used"],
+            name="resample",
+            parameters={"sfreq_out": 512.0},
+            summary_metrics={"changed": True},
+            warnings=[],
             figures=[],
         )
     """
 
     name: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    summary_metrics: Dict[str, Any] = field(default_factory=dict)
-    warnings: List[str] = field(default_factory=list)
-    figures: List[str] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert to a JSON-serializable dictionary.
-
-        Usage example
-        -------------
-            payload = artifact.to_dict()
-        """
-        return asdict(self)
+    parameters: Mapping[str, Any]
+    summary_metrics: Mapping[str, float]
+    warnings: Sequence[str] = field(default_factory=list)
+    figures: Sequence[Any] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Geometry:
     """
-    Geometry information attached to a recording.
-
-    This module does not validate naming conventions; validation belongs to a
-    separate standardization layer.
+    Geometry information for electrodes.
 
     Attributes
     ----------
     coords_m
-        Mapping from channel name to coordinate (x, y, z) in meters.
+        Mapping channel -> (x, y, z) in meters.
     neighbors
-        Optional neighbor graph, used by local rereferencing methods (e.g., Laplacian).
+        Optional neighbor graph for Laplacian-like referencing.
     shafts
-        Optional mapping from shaft name to ordered channel names.
+        Optional mapping shaft -> ordered channel names.
 
     Usage example
     -------------
-        geom = Geometry(coords_m={"A1": (0.0, 0.0, 0.0)})
+        geom = Geometry(coords_m={"A1": (0.0, 0.0, 0.0)}, neighbors={}, shafts={})
     """
 
-    coords_m: Dict[str, Tuple[float, float, float]] = field(default_factory=dict)
-    neighbors: Dict[str, List[str]] = field(default_factory=dict)
-    shafts: Dict[str, List[str]] = field(default_factory=dict)
+    coords_m: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
+    neighbors: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    shafts: Mapping[str, Sequence[str]] = field(default_factory=dict)
 
 
 @dataclass
 class PreprocContext:
     """
-    Shared context for preprocessing.
-
-    Blocks should store *decisions* and *intermediate metadata* here, while keeping
-    the Raw signal transformations explicit in their return values.
+    Preprocessing context: provenance ledger + decisions.
 
     Attributes
     ----------
     proc_history
-        Ordered list of `ProcRecord` entries appended by blocks/pipelines.
-    geometry
-        Geometry derived/attached in coordinate block.
+        Ordered list of provenance records.
     decisions
-        Human / semi-automatic decisions to carry forward (e.g., final bad channel list).
-    scratch
-        Ephemeral space for intermediate computations (not intended to be saved).
+        Free-form decisions made by blocks/pipelines (e.g., bad channels).
+    geometry
+        Optional electrode geometry.
 
     Usage example
     -------------
         ctx = PreprocContext()
-        ctx.add_record("resample", {"sfreq_out": 512.0})
+        ctx.add_record("line_noise", {"method": "notch"})
     """
 
-    proc_history: List[ProcRecord] = field(default_factory=list)
-    geometry: Optional[Geometry] = None
+    proc_history: List[Dict[str, Any]] = field(default_factory=list)
     decisions: MutableMapping[str, Any] = field(default_factory=dict)
-    scratch: MutableMapping[str, Any] = field(default_factory=dict)
+    geometry: Optional[Geometry] = None
 
-    def add_record(self, block_name: str, parameters: Mapping[str, Any]) -> None:
-        """
-        Append a preprocessing record to the provenance ledger.
-
-        Usage example
-        -------------
-            ctx.add_record("line_noise", {"method": "notch", "freq_base": 50})
-        """
-        created_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.proc_history.append(
-            ProcRecord(
-                block_name=block_name,
-                parameters=dict(parameters),
-                created_utc=created_utc,
-            )
-        )
+    def add_record(self, step: str, parameters: Mapping[str, Any]) -> None:
+        self.proc_history.append({"step": step, "parameters": dict(parameters)})
 
 
 @dataclass(frozen=True)
-class BadChannelReason:
+class PreprocResult:
     """
-    Human-readable reason for suggesting a channel as bad.
+    Result of a preprocessing pipeline.
 
-    Parameters
+    Attributes
     ----------
-    reason_type
-        Machine-readable label, e.g. "flat", "high_variance".
-    value
-        Observed metric value.
-    threshold
-        Threshold used to flag the channel.
-    note
-        Optional explanation.
+    views
+        Mapping from view name to Raw object. Must contain "original".
+    artifacts
+        Ordered artifacts for reporting.
+    ctx
+        Context (provenance + decisions).
 
     Usage example
     -------------
-        r = BadChannelReason("flat", value=1e-12, threshold=1e-10, note="variance too low")
+        result = PreprocResult(views={"original": raw}, artifacts=[], ctx=PreprocContext())
     """
 
-    reason_type: str
-    value: float
-    threshold: float
-    note: str = ""
+    views: Mapping[str, mne.io.BaseRaw]
+    artifacts: Sequence[BlockArtifact]
+    ctx: PreprocContext

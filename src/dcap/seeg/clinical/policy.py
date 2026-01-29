@@ -1,5 +1,7 @@
 from typing import Mapping, Tuple
+
 import mne
+
 from dcap.seeg.clinical.configs import AnalysisView
 
 def choose_analysis_view(

@@ -1,138 +1,106 @@
 # =============================================================================
-#                   ############################################
-#                   #   PIPELINE: CLINICAL COMMON PREPROCESS   #
-#                   ############################################
 # =============================================================================
-#
-# Logic-only orchestration of reusable blocks for a "clinical-style" baseline.
-#
-# This module:
-# - does not read or write any files
-# - does not parse CLI arguments
-# - does not print
-#
-# The CLI layer should:
-# - load Raw + electrode metadata from disk
-# - call `run_clinical_preproc`
-# - write outputs + build reports
-#
+#                     ########################################
+#                     #   PIPELINE: CLINICAL PREPROCESSING   #
+#                     ########################################
+# =============================================================================
 # =============================================================================
 
-from dataclasses import asdict, dataclass
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence
 
-from dcap.seeg.preprocessing.blocks import (
-    attach_coordinates,
-    compute_gamma_envelope,
-    highpass_filter,
-    rereference,
-    remove_line_noise,
-    resample_raw,
-    suggest_bad_channels,
-)
+import mne
+
+from dcap.seeg.preprocessing.blocks.coordinates import attach_coordinates
+from dcap.seeg.preprocessing.blocks.filtering import highpass_filter
+from dcap.seeg.preprocessing.blocks.line_noise import remove_line_noise
+from dcap.seeg.preprocessing.blocks.resample import resample_raw
+from dcap.seeg.preprocessing.blocks.rereference import rereference
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig, CoordinatesConfig
-from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
-
-
-@dataclass(frozen=True)
-class ClinicalPreprocResult:
-    """
-    Return object for the clinical preprocessing pipeline.
-
-    Attributes
-    ----------
-    views
-        Mapping of view name -> Raw (e.g., "original", "car", "bipolar", "laplacian").
-    artifacts
-        Ordered list of block artifacts (one per executed step).
-    ctx
-        Context containing provenance + decisions.
-
-    Usage example
-    -------------
-        result = run_clinical_preproc(raw, electrodes_table, cfg, coords_cfg)
-        views = result.views
-        artifacts = result.artifacts
-    """
-
-    views: Mapping[str, "mne.io.BaseRaw"]
-    artifacts: Sequence[BlockArtifact]
-    ctx: PreprocContext
+from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext, PreprocResult
 
 
 def run_clinical_preproc(
-    raw: "mne.io.BaseRaw",
-    electrodes_table: Optional[Mapping[str, Sequence[float]]],
+    *,
+    raw: mne.io.BaseRaw,
     cfg: ClinicalPreprocConfig,
+    electrodes_table: Optional[Mapping[str, Sequence[float]]] = None,
     coords_cfg: Optional[CoordinatesConfig] = None,
     ctx: Optional[PreprocContext] = None,
-) -> ClinicalPreprocResult:
+) -> PreprocResult:
     """
-    Run the clinical-style common preprocessing pipeline (logic-only).
+    Run the standard clinical preprocessing pipeline (logic-only).
 
     Parameters
     ----------
     raw
-        MNE Raw object.
-    electrodes_table
-        Optional mapping channel -> (x,y,z) coordinates. If provided, coordinates are attached.
+        Input Raw.
     cfg
-        Pipeline configuration.
+        Clinical preprocessing configuration bundle.
+    electrodes_table
+        Optional mapping contact -> (x, y, z) in cfg.coords.unit.
     coords_cfg
-        Coordinates block configuration (required if electrodes_table is provided).
+        Optional override for coordinate config; if None, uses cfg.coords.
     ctx
-        Optional existing context; if None, a fresh context is created.
+        Optional existing context.
 
     Returns
     -------
     result
-        Pipeline result with views + artifacts + context.
+        PreprocResult with views (includes "original"), artifacts, and context.
 
     Usage example
     -------------
-        cfg = ClinicalPreprocConfig()
-        result = run_clinical_preproc(
-            raw=raw,
-            electrodes_table={"A1": (12.3, -4.5, 6.7)},
-            cfg=cfg,
-            coords_cfg=CoordinatesConfig(unit="mm"),
-        )
+        result = run_clinical_preproc(raw=raw, cfg=ClinicalPreprocConfig())
     """
-    import mne
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("run_clinical_preproc expects an mne.io.BaseRaw.")
 
-    if ctx is None:
-        ctx = PreprocContext()
+    ctx_final = ctx if ctx is not None else PreprocContext()
+    artifacts: list[BlockArtifact] = []
 
-    artifacts: List[BlockArtifact] = []
+    current_raw = raw.copy()
+    views = {"original": current_raw}
 
-    ctx.add_record("pipeline_clinical_preproc", asdict(cfg))
-
-    if electrodes_table is not None:
-        if coords_cfg is None:
-            raise ValueError("coords_cfg must be provided when electrodes_table is provided.")
-        raw, artifact = attach_coordinates(raw, electrodes_table, coords_cfg, ctx)
+    # Coordinates
+    if cfg.do_coordinates and electrodes_table is not None:
+        coords_cfg_final = coords_cfg if coords_cfg is not None else cfg.coords
+        current_raw, artifact = attach_coordinates(
+            raw=current_raw,
+            electrodes_table=electrodes_table,
+            cfg=coords_cfg_final,
+            ctx=ctx_final,
+        )
         artifacts.append(artifact)
+        views["original"] = current_raw
 
-    raw, artifact = remove_line_noise(raw, cfg.line_noise, ctx)
-    artifacts.append(artifact)
-
-    raw, artifact = highpass_filter(raw, cfg.highpass, ctx)
-    artifacts.append(artifact)
-
-    if cfg.gamma_envelope is not None:
-        raw, artifact = compute_gamma_envelope(raw, cfg.gamma_envelope, ctx)
+    # Line noise
+    if cfg.do_line_noise:
+        current_raw, artifact = remove_line_noise(raw=current_raw, cfg=cfg.line_noise, ctx=ctx_final)
         artifacts.append(artifact)
+        views["original"] = current_raw
 
-    if cfg.resample is not None:
-        raw, artifact = resample_raw(raw, cfg.resample, ctx)
+    # High-pass
+    if cfg.do_highpass:
+        current_raw, artifact = highpass_filter(raw=current_raw, cfg=cfg.highpass, ctx=ctx_final)
         artifacts.append(artifact)
+        views["original"] = current_raw
 
-    raw, artifact = suggest_bad_channels(raw, cfg.bad_channels, ctx)
-    artifacts.append(artifact)
+    # Resample
+    if cfg.do_resample:
+        current_raw, artifact = resample_raw(raw=current_raw, cfg=cfg.resample, ctx=ctx_final)
+        artifacts.append(artifact)
+        views["original"] = current_raw
 
-    views, artifact = rereference(raw, cfg.rereference, ctx)
-    artifacts.append(artifact)
+    # Rereference (generates additional views)
+    if cfg.do_rereference:
+        reref_views, artifact = rereference(raw=current_raw, cfg=cfg.rereference, ctx=ctx_final)
+        artifacts.append(artifact)
+        # Ensure original reflects latest voltage-space raw
+        if "original" in reref_views:
+            views["original"] = reref_views["original"]
+        for name, v in reref_views.items():
+            if name == "original":
+                continue
+            views[name] = v
 
-    return ClinicalPreprocResult(views=views, artifacts=artifacts, ctx=ctx)
+    return PreprocResult(views=views, artifacts=artifacts, ctx=ctx_final)

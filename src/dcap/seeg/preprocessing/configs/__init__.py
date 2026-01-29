@@ -5,15 +5,6 @@
 #                      ########################################
 # =============================================================================
 # =============================================================================
-#
-# Central export surface for preprocessing configuration dataclasses.
-#
-# Keep configs:
-# - small and explicit
-# - JSON/YAML-serializable via dataclasses.asdict
-# - validated in __post_init__ (lightweight invariants only)
-#
-# =============================================================================
 
 from dcap.seeg.preprocessing.configs.coordinates import CoordinatesConfig
 from dcap.seeg.preprocessing.configs.filtering import GammaEnvelopeConfig, HighpassConfig

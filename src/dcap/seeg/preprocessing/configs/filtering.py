@@ -1,32 +1,8 @@
-# =============================================================================
-# =============================================================================
-#                     ########################################
-#                     #          CONFIG: FILTERING           #
-#                     ########################################
-# =============================================================================
-# =============================================================================
-
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-
 @dataclass(frozen=True)
 class HighpassConfig:
-    """
-    Configuration for high-pass filtering.
-
-    Attributes
-    ----------
-    l_freq
-        High-pass cutoff in Hz.
-    phase
-        Filter phase. "zero" is zero-phase (non-causal) filtering.
-
-    Usage example
-    -------------
-        cfg = HighpassConfig(l_freq=0.5, phase="zero")
-    """
-
     l_freq: float = 0.5
     phase: Literal["zero", "minimum"] = "zero"
 
@@ -34,28 +10,8 @@ class HighpassConfig:
         if self.l_freq <= 0:
             raise ValueError(f"l_freq must be > 0, got {self.l_freq}.")
 
-
 @dataclass(frozen=True)
 class GammaEnvelopeConfig:
-    """
-    Configuration for computing a gamma/HFA envelope time series.
-
-    Attributes
-    ----------
-    band_hz
-        Band-pass range in Hz (low, high).
-    method
-        Envelope extraction method.
-        - "hilbert": magnitude of analytic signal
-        - "rectified_smooth": abs(bandpassed) then smooth
-    smoothing_sec
-        Optional smoothing window in seconds (moving average). 0 disables smoothing.
-
-    Usage example
-    -------------
-        cfg = GammaEnvelopeConfig(band_hz=(70.0, 150.0), method="hilbert", smoothing_sec=0.1)
-    """
-
     band_hz: Tuple[float, float] = (70.0, 150.0)
     method: Literal["hilbert", "rectified_smooth"] = "hilbert"
     smoothing_sec: float = 0.1

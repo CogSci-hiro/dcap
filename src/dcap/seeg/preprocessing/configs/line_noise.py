@@ -1,36 +1,8 @@
-# =============================================================================
-# =============================================================================
-#                     ########################################
-#                     #       CONFIG: LINE NOISE REMOVAL     #
-#                     ########################################
-# =============================================================================
-# =============================================================================
-
 from dataclasses import dataclass
 from typing import Literal, Optional, Sequence
 
-
 @dataclass(frozen=True)
 class LineNoiseConfig:
-    """
-    Configuration for line-noise removal.
-
-    Attributes
-    ----------
-    method
-        "notch" uses MNE notch filtering; "zapline" uses meegkit zapline (if installed).
-    freq_base
-        Base line frequency in Hz (typically 50 or 60).
-    max_harmonic_hz
-        Highest harmonic to remove (inclusive).
-    picks
-        Optional channel names to process. None means all channels.
-
-    Usage example
-    -------------
-        cfg = LineNoiseConfig(method="notch", freq_base=50.0, max_harmonic_hz=250.0)
-    """
-
     method: Literal["notch", "zapline"] = "notch"
     freq_base: float = 50.0
     max_harmonic_hz: float = 250.0
