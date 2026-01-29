@@ -7,15 +7,15 @@ Usage example
     dcap report patient --subject sub-001 --out-dir ./out
 """
 
-from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from dcap.viz import api as viz_api
 
 
-def add_parser(subparsers: argparse._SubParsersAction) -> None:
+def add_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser("patient", help="Generate patient report")
     _configure_parser(parser)
     parser.set_defaults(func=run)
