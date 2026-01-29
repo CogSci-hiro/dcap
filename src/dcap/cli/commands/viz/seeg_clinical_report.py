@@ -45,7 +45,7 @@ def add_parser(subparsers: Any) -> argparse.ArgumentParser:
     return parser
 
 
-def run(args: argparse.Namespace, cfg: Any) -> Path:
+def run(args: argparse.Namespace, cfg: Any) -> Path:  # noqa cfg needed for generic run
     analysis_cfg = ClinicalAnalysisConfig(analysis_view=str(args.analysis_view))
 
     envelope_cfg: Optional[GammaEnvelopeConfig] = None
