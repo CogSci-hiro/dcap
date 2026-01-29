@@ -17,8 +17,8 @@
 from dataclasses import asdict
 from typing import Dict, Tuple
 
-from dcap.seeg.preprocessing.configs import RereferenceConfig
-from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.preprocessing.configs import RereferenceConfig
+from dcap.preprocessing.types import BlockArtifact, PreprocContext
 
 
 def rereference(
