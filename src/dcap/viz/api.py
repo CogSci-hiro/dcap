@@ -82,12 +82,33 @@ def make_task_report(*, task: str, out_dir: Path) -> Path:
     return _export_report(artifacts, title=f"DCAP Task Report: {task}", out_dir=out_dir)
 
 
-def make_patient_report(*, subject: str, out_dir: Path) -> Path:
-    artifacts = ReportArtifacts()
-    artifacts.figures |= inventory_mod.make_figures(extra_title=f"Subject={subject}")
-    artifacts.figures |= timeline_mod.make_figures(extra_title=f"Subject={subject}")
-    artifacts.figures |= integrity_mod.make_figures(extra_title=f"Subject={subject}")
-    artifacts.figures |= sampling_mod.make_figures(extra_title=f"Subject={subject}")
+def make_patient_report(*, subject: str, out_dir: Path, mode: str = "clinical") -> Path:
+    """Generate a patient report.
+
+    Notes
+    -----
+    - Thin wrapper delegating to `dcap.viz.reports.patient`.
+    - In this skeleton, viz-ready input tables are not constructed yet.
+
+    Parameters
+    ----------
+    subject
+        Subject ID (e.g., "sub-001").
+    out_dir
+        Output directory.
+    mode
+        "clinical" or "research" (research is not implemented yet).
+
+    Returns
+    -------
+    Path
+        Output directory.
+    """
+    from dcap.viz.reports.patient import build_patient_report
+
+    tables: dict[str, pd.DataFrame] = {}
+    return build_patient_report(subject=subject, mode=mode, tables=tables, out_dir=out_dir)
+
 
     artifacts.summary = {"scope": "patient", "subject": subject, "status": "skeleton"}
     return _export_report(artifacts, title=f"DCAP Patient Report: {subject}", out_dir=out_dir)

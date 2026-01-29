@@ -1,291 +1,182 @@
 # =============================================================================
-#                        Patient Report (Skeleton)
+#                     Patient Report Builder (Clinical Mode)
 # =============================================================================
-"""
-Patient-specific report builder.
+"""Patient-specific report builder.
 
-This module defines the structure of patient reports.
-It does NOT perform data loading or heavy computation.
-
-Supported modes
-----------------
-- mode="clinical": clinical-facing report (IMPLEMENTED: structure only)
-- mode="research": research-facing report (NOT IMPLEMENTED)
-
-Design principles
------------------
-- One report == one patient
-- Viz-ready tables are passed in
-- All selection rules and parameters are explicit
-- No CLI logic here
+This module wires the *clinical patient report* using a declarative specification.
+It is responsible for section assembly, placeholder figure creation, and export wiring.
+It does not perform heavy computations (HG/TRF computation is upstream).
 
 Usage example
--------------
-from pathlib import Path
-from dcap.viz.reports.patient import build_patient_report
+    from pathlib import Path
+    import pandas as pd
+    from dcap.viz.reports.patient import build_patient_report
 
-build_patient_report(
-    subject="sub-001",
-    mode="clinical",
-    tables=tables,
-    out_dir=Path("out/sub-001"),
-)
+    build_patient_report(
+        subject="sub-001",
+        mode="clinical",
+        tables={},
+        out_dir=Path("./out/sub-001"),
+    )
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any
 
 import pandas as pd
 
-from dcap.viz.models import ReportArtifacts, ReportConfig
 from dcap.viz import export
-
-
-# -------------------------------------------------------------------------
-# Public API
-# -------------------------------------------------------------------------
-
-PatientReportMode = Literal["clinical", "research"]
+from dcap.viz.models import ReportArtifacts, ReportConfig
+from dcap.viz.reports.patient_spec import PatientClinicalReportSpec, ReportMode
 
 
 def build_patient_report(
     *,
     subject: str,
-    mode: PatientReportMode,
+    mode: ReportMode,
     tables: dict[str, pd.DataFrame],
     out_dir: Path,
     config: ReportConfig | None = None,
+    strict: bool = False,
 ) -> Path:
-    """
-    Build a patient-specific report.
+    """Build a patient-specific report.
 
     Parameters
     ----------
     subject
         Subject identifier (anonymized).
     mode
-        Report mode. Must be "clinical" or "research".
+        Report mode. "clinical" is implemented structurally; "research" is not implemented.
     tables
-        Dictionary of viz-ready tables required for report construction.
-        Keys are agreed canonical names (e.g., inventory_df, sampling_df, etc.).
+        Viz-ready tables required for report construction.
+        This skeleton tolerates missing tables unless `strict=True`.
     out_dir
         Output directory for the report.
     config
-        Optional report configuration. If None, defaults are used.
+        Optional report configuration.
+    strict
+        If True, missing expected inputs raise an error.
 
     Returns
     -------
     Path
-        Path to the report output directory.
+        Output directory path.
 
     Raises
     ------
     NotImplementedError
         If mode="research".
+    ValueError
+        If strict validation fails or unknown mode is provided.
     """
-    if mode == "clinical":
-        return _build_clinical_patient_report(
-            subject=subject,
-            tables=tables,
-            out_dir=out_dir,
-            config=config,
-        )
-
     if mode == "research":
-        raise NotImplementedError(
-            "Patient report mode='research' is not implemented yet."
-        )
+        raise NotImplementedError("mode='research' is not implemented yet.")
 
-    raise ValueError(f"Unknown patient report mode: {mode!r}")
+    if mode != "clinical":
+        raise ValueError(f"Unknown mode: {mode!r}")
 
+    spec = PatientClinicalReportSpec.default()
+    missing = spec.validate_input_tables(tables)
+    if missing and strict:
+        raise ValueError(f"Missing expected input tables: {missing}")
 
-# -------------------------------------------------------------------------
-# Clinical mode implementation (STRUCTURE ONLY)
-# -------------------------------------------------------------------------
-
-
-def _build_clinical_patient_report(
-    *,
-    subject: str,
-    tables: dict[str, pd.DataFrame],
-    out_dir: Path,
-    config: ReportConfig | None,
-) -> Path:
-    """
-    Build a clinical-mode patient report.
-
-    This function wires together all report sections but does not
-    implement actual plotting or analysis logic yet.
-    """
-    cfg = config or ReportConfig(
-        title=f"DCAP Clinical Patient Report — {subject}"
-    )
+    cfg = config or ReportConfig(title=f"DCAP Clinical Patient Report — {subject}")
 
     artifacts = ReportArtifacts()
-    artifacts.manifest = _build_manifest(subject=subject, mode="clinical")
+    artifacts.summary = {
+        "subject": subject,
+        "mode": mode,
+        "status": "skeleton",
+        "missing_inputs": missing,
+    }
+    artifacts.manifest = {
+        "subject": subject,
+        "mode": mode,
+        "generator": "dcap.viz.reports.patient",
+        "spec": {
+            "sections": [s.section_id for s in spec.sections],
+            "figure_ids": list(spec.all_figure_ids()),
+            "table_ids": list(spec.all_table_ids()),
+        },
+    }
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Section 0 — Header / Cover
-    # ------------------------------------------------------------------
-    _add_header_section(artifacts, subject=subject)
+    # -------------------------------------------------------------------------
+    artifacts.figures["header_placeholder"] = _placeholder_figure(f"Header — {subject}")
 
-    # ------------------------------------------------------------------
-    # Section 1 — Patient Snapshot (Anonymized)
-    # ------------------------------------------------------------------
-    _add_patient_snapshot_section(artifacts, subject, tables)
+    # -------------------------------------------------------------------------
+    # Section 1 — Patient Snapshot
+    # -------------------------------------------------------------------------
+    artifacts.figures["patient_minutes_per_task"] = _placeholder_figure(f"Minutes per task — {subject}")
+    clinical_subject = tables.get("clinical_subject_df")
+    if clinical_subject is not None and "subject" in clinical_subject.columns:
+        artifacts.tables["patient_snapshot"] = clinical_subject[clinical_subject["subject"] == subject].copy()
 
-    # ------------------------------------------------------------------
-    # Section 2 — Common Preprocessing Summary
-    # ------------------------------------------------------------------
-    _add_common_preprocessing_section(artifacts, tables)
+    # -------------------------------------------------------------------------
+    # Section 2 — Common preprocessing
+    # -------------------------------------------------------------------------
+    preprocessing = tables.get("preprocessing_common_df")
+    if preprocessing is not None:
+        artifacts.tables["preprocessing_common"] = preprocessing.copy()
 
-    # ------------------------------------------------------------------
-    # Section 3+ — Clinical Task Sections
-    # ------------------------------------------------------------------
-    if _task_present(tables, "naming"):
-        _add_naming_section(artifacts, subject, tables)
+    # -------------------------------------------------------------------------
+    # Section 3 — Naming task (HG)
+    # -------------------------------------------------------------------------
+    artifacts.figures["naming_hg_full"] = _placeholder_figure(f"Naming — High Gamma (Full) — {subject}")
+    artifacts.figures["naming_hg_selected"] = _placeholder_figure(f"Naming — Selected Electrodes — {subject}")
+    artifacts.figures["naming_hg_topography"] = _placeholder_figure(f"Naming — High Gamma Topography (3D) — {subject}")
 
-    if _task_present(tables, "sorciere"):
-        _add_trf_task_section(
-            artifacts,
-            subject,
-            tables,
-            task="sorciere",
-        )
+    scores = tables.get("naming_inputs_df")
+    if scores is not None:
+        artifacts.tables["naming_inputs"] = scores.copy()
 
-    if _task_present(tables, "diapix"):
-        _add_trf_task_section(
-            artifacts,
-            subject,
-            tables,
-            task="diapix",
-        )
+    # -------------------------------------------------------------------------
+    # Section 4 — Sorciere (TRF)
+    # -------------------------------------------------------------------------
+    _add_trf_task_placeholders(artifacts, subject=subject, task="sorciere", tables=tables)
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Section 5 — Diapix (TRF)
+    # -------------------------------------------------------------------------
+    _add_trf_task_placeholders(artifacts, subject=subject, task="diapix", tables=tables)
+
+    # -------------------------------------------------------------------------
     # Export
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     figures_dir = export.ensure_dir(out_dir / "figures")
     tables_dir = export.ensure_dir(out_dir / "tables")
 
-    figure_paths = _save_figures_placeholder(
-        artifacts.figures, figures_dir
-    )
-
+    figure_paths = _save_figures(artifacts.figures, figures_dir)
     export.save_tables(artifacts.tables, tables_dir)
     export.save_summary(artifacts.summary, out_dir / "summary.json")
     export.save_manifest(artifacts.manifest, out_dir / "manifest.json")
-
-    export.export_report_html(
-        title=cfg.title,
-        figure_paths=figure_paths,
-        out_file=out_dir / "report.html",
-    )
+    export.export_report_html(title=cfg.title, figure_paths=figure_paths, out_file=out_dir / "report.html")
 
     return out_dir
 
 
-# -------------------------------------------------------------------------
-# Section builders (skeletons)
-# -------------------------------------------------------------------------
+# =============================================================================
+#                                 Utilities
+# =============================================================================
 
-
-def _add_header_section(
+def _add_trf_task_placeholders(
     artifacts: ReportArtifacts,
     *,
     subject: str,
-) -> None:
-    """Section 0 — Header / cover ribbon."""
-    artifacts.summary.setdefault("subject", subject)
-    artifacts.summary.setdefault("mode", "clinical")
-    artifacts.summary.setdefault("status", "skeleton")
-
-
-def _add_patient_snapshot_section(
-    artifacts: ReportArtifacts,
-    subject: str,
-    tables: dict[str, pd.DataFrame],
-) -> None:
-    """Section 1 — Patient snapshot (anonymized)."""
-    # Expected input: clinical_subject_df (optional)
-    df = tables.get("clinical_subject_df")
-    if df is not None:
-        artifacts.tables["patient_snapshot"] = df[df["subject"] == subject]
-
-
-def _add_common_preprocessing_section(
-    artifacts: ReportArtifacts,
-    tables: dict[str, pd.DataFrame],
-) -> None:
-    """Section 2 — Common preprocessing summary."""
-    # Expected input: preprocessing_common_df (key/value)
-    df = tables.get("preprocessing_common_df")
-    if df is not None:
-        artifacts.tables["preprocessing_common"] = df
-
-
-def _add_naming_section(
-    artifacts: ReportArtifacts,
-    subject: str,
-    tables: dict[str, pd.DataFrame],
-) -> None:
-    """Clinical task: Naming (high gamma)."""
-    # Placeholders only
-    artifacts.figures["naming_hg_full"] = _placeholder_figure(
-        f"Naming — High Gamma (Full) — {subject}"
-    )
-    artifacts.figures["naming_hg_selected"] = _placeholder_figure(
-        f"Naming — Selected Electrodes — {subject}"
-    )
-    artifacts.figures["naming_hg_topography"] = _placeholder_figure(
-        f"Naming — High Gamma Topography — {subject}"
-    )
-
-
-def _add_trf_task_section(
-    artifacts: ReportArtifacts,
-    subject: str,
-    tables: dict[str, pd.DataFrame],
-    *,
     task: str,
+    tables: dict[str, pd.DataFrame],
 ) -> None:
-    """Clinical task: TRF-based (Sorcière, Diapix)."""
-    prefix = f"{task}_trf"
+    artifacts.figures[f"{task}_trf_scores"] = _placeholder_figure(f"{task.capitalize()} — TRF Scores — {subject}")
+    artifacts.figures[f"{task}_trf_topography"] = _placeholder_figure(f"{task.capitalize()} — TRF Topography (3D) — {subject}")
+    artifacts.figures[f"{task}_trf_kernels"] = _placeholder_figure(f"{task.capitalize()} — TRF Kernels — {subject}")
 
-    artifacts.figures[f"{prefix}_scores"] = _placeholder_figure(
-        f"{task.capitalize()} — TRF Scores — {subject}"
-    )
-    artifacts.figures[f"{prefix}_topography"] = _placeholder_figure(
-        f"{task.capitalize()} — TRF Topography — {subject}"
-    )
-    artifacts.figures[f"{prefix}_kernels"] = _placeholder_figure(
-        f"{task.capitalize()} — TRF Kernels — {subject}"
-    )
+    task_scores = tables.get(f"{task}_trf_scores_df")
+    if task_scores is not None:
+        artifacts.tables[f"{task}_trf_scores"] = task_scores.copy()
 
 
-# -------------------------------------------------------------------------
-# Utilities (skeleton)
-# -------------------------------------------------------------------------
-
-
-def _task_present(tables: dict[str, pd.DataFrame], task: str) -> bool:
-    """Return True if task-specific tables appear to be present."""
-    return any(key.startswith(task) for key in tables)
-
-
-def _build_manifest(*, subject: str, mode: str) -> dict:
-    """Build minimal manifest (expand later)."""
-    return {
-        "subject": subject,
-        "mode": mode,
-        "generator": "dcap.viz.reports.patient",
-    }
-
-
-def _placeholder_figure(title: str):
-    """Create a tiny placeholder Matplotlib figure."""
+def _placeholder_figure(title: str) -> Any:
     import matplotlib.pyplot as plt
 
     fig = plt.figure()
@@ -293,14 +184,13 @@ def _placeholder_figure(title: str):
     return fig
 
 
-def _save_figures_placeholder(figures: dict, out_dir: Path) -> list[Path]:
-    """Save figures, assuming Matplotlib or placeholders."""
+def _save_figures(figures: dict[str, Any], out_dir: Path) -> list[Path]:
     paths: list[Path] = []
     for name, fig in figures.items():
-        out = out_dir / f"{name}.png"
+        out_path = out_dir / f"{name}.png"
         try:
-            fig.savefig(out, dpi=150, bbox_inches="tight")
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
         except Exception:
-            out.write_bytes(b"")
-        paths.append(out)
+            out_path.write_bytes(b"")
+        paths.append(out_path)
     return paths
