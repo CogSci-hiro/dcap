@@ -1,128 +1,132 @@
 # =============================================================================
-#                        Analysis: TRF (model fitting)
-# =============================================================================
-#
-# Minimal TRF fitting API.
-#
-# The intended baseline model is ridge regression on a lagged stimulus matrix:
-#   y(t) ~ sum_{lag} w(lag) * x(t - lag)
-#
+#                     TRF analysis: fitting dispatcher
 # =============================================================================
 
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping
 
 import numpy as np
-from numpy.typing import NDArray
 
-from dcap.analysis.trf.design_matrix import build_lagged_design_matrix
-from dcap.analysis.trf.types import LagConfig, TrfFitConfig, TrfResult
-
-
-FloatArray = NDArray[np.floating]
+from dcap.analysis.trf.backends.registry import get_backend
+from dcap.analysis.trf.backends.mne_rf import MneRfBackendConfig
+from dcap.analysis.trf.design_matrix import LagConfig, make_lag_samples
+from dcap.analysis.trf.types import TrfFitConfig
 
 
-def fit_trf_ridge(
-    x: FloatArray,
-    y: FloatArray,
-    lag_cfg: LagConfig,
-    fit_cfg: TrfFitConfig,
-) -> TrfResult:
-    """Fit a ridge-regularized TRF model.
+@dataclass(frozen=True, slots=True)
+class TrfFitResult:
+    """
+    High-level TRF fit result (backend-agnostic wrapper).
 
-    Parameters
+    Attributes
     ----------
-    x
-        Stimulus feature(s), shape (n_samples,) or (n_samples, n_features).
-    y
-        Neural data, shape (n_samples,) or (n_samples, n_outputs).
-    lag_cfg
-        Time-lag settings used to construct the design matrix.
-    fit_cfg
-        Model fitting configuration.
+    backend : str
+        Backend name used to fit the model.
+    lags_samp : ndarray
+        Lags used (samples).
+    coef_ : ndarray
+        Coefficients as returned by the backend.
+    intercept_ : ndarray
+        Intercept as returned by the backend.
+    extra : Mapping[str, Any]
+        Backend extras (may include fitted estimator object).
+    """
 
-    Returns
-    -------
-    result
-        Fitted TRF result container.
+    backend: str
+    lags_samp: np.ndarray
+    coef_: np.ndarray
+    intercept_: np.ndarray
+    extra: Mapping[str, Any]
+
+
+def fit_trf(
+    X_unlagged: np.ndarray,
+    Y: np.ndarray,
+    *,
+    sfreq: float,
+    lag_config: LagConfig,
+    fit_config: TrfFitConfig,
+) -> TrfFitResult:
+    """
+    Fit TRF using the selected backend.
 
     Notes
     -----
-    - This skeleton leaves scaling/standardization and CV unimplemented.
-    - Decide and document your weight shape convention when implementing.
-
-    Usage example
-    -------------
-        import numpy as np
-        from dcap.analysis.trf import LagConfig, TrfFitConfig, fit_trf_ridge
-
-        x = np.random.randn(2000).astype(float)
-        y = np.random.randn(2000, 16).astype(float)
-        result = fit_trf_ridge(
-            x=x,
-            y=y,
-            lag_cfg=LagConfig(-0.2, 0.6, 200.0),
-            fit_cfg=TrfFitConfig(alpha=100.0),
-        )
+    - `X_unlagged` is stimulus/features sampled at `sfreq`, shape (n_times, n_features).
+    - `Y` is neural data sampled at `sfreq`, shape (n_times, n_outputs).
+    - The backend is responsible for applying lags (or ignoring them if it expects lagged X).
     """
-    _validate_xy(x=x, y=y)
 
-    # Build lagged design matrix (implementation pending)
-    X_lagged, lags_s = build_lagged_design_matrix(x=x, cfg=lag_cfg)
+    if X_unlagged.ndim == 1:
+        X_unlagged = X_unlagged[:, np.newaxis]
+    if Y.ndim == 1:
+        Y = Y[:, np.newaxis]
+    if X_unlagged.shape[0] != Y.shape[0]:
+        raise ValueError("X and Y must have the same n_times.")
 
-    raise NotImplementedError(
-        "TODO: implement ridge regression fit and return TrfResult. "
-        "Likely steps: standardize, add intercept, solve ridge, compute metrics."
+    lags_samp = make_lag_samples(sfreq=sfreq, config=lag_config)
+
+    backend = get_backend(fit_config.backend)
+    backend_cfg = _make_backend_config(backend_name=backend.name, params=fit_config.backend_params)
+
+    fit_out = backend.fit(
+        X_unlagged,
+        Y,
+        sfreq=sfreq,
+        lags_samp=lags_samp,
+        config=backend_cfg,
+    )
+
+    return TrfFitResult(
+        backend=backend.name,
+        lags_samp=lags_samp,
+        coef_=fit_out.coef_,
+        intercept_=fit_out.intercept_,
+        extra=dict(fit_out.extra),
     )
 
 
 def predict_trf(
-    x: FloatArray,
-    result: TrfResult,
-    lag_cfg: LagConfig,
-) -> FloatArray:
-    """Predict neural response using a fitted TRF model.
-
-    Parameters
-    ----------
-    x
-        Stimulus feature(s), shape (n_samples,) or (n_samples, n_features).
-    result
-        Fitted TRF model container.
-    lag_cfg
-        Lag settings matching those used for fitting.
-
-    Returns
-    -------
-    y_hat
-        Predicted neural response, shape (n_samples, n_outputs).
-
-    Usage example
-    -------------
-        y_hat = predict_trf(x, result, lag_cfg)
+    X_unlagged: np.ndarray,
+    fit_result: TrfFitResult,
+) -> np.ndarray:
     """
-    _validate_x_for_predict(x=x)
+    Predict neural responses using a fitted TRF model.
 
-    # Build lagged design matrix (implementation pending)
-    X_lagged, _ = build_lagged_design_matrix(x=x, cfg=lag_cfg)
+    Notes
+    -----
+    The backend is responsible for interpreting the contents of
+    `fit_result.extra` (e.g. stored estimator object).
+    """
+    if X_unlagged.ndim == 1:
+        X_unlagged = X_unlagged[:, np.newaxis]
 
-    raise NotImplementedError("TODO: implement prediction.")  # noqa: TRY003
+    backend = get_backend(fit_result.backend)
+
+    from dcap.analysis.trf.backends.base import BackendFitResult
+
+    backend_fit_result = BackendFitResult(
+        coef_=fit_result.coef_,
+        intercept_=fit_result.intercept_,
+        extra=fit_result.extra,
+    )
+
+    return backend.predict(X_unlagged, backend_fit_result)
 
 
-def _validate_xy(x: FloatArray, y: FloatArray) -> None:
-    if x.shape[0] != y.shape[0]:
-        raise ValueError(f"x and y must have same n_samples, got {x.shape[0]} vs {y.shape[0]}.")
-    if x.ndim not in (1, 2):
-        raise ValueError(f"x must be 1D or 2D, got shape={x.shape!r}.")
-    if y.ndim not in (1, 2):
-        raise ValueError(f"y must be 1D or 2D, got shape={y.shape!r}.")
-    if not np.issubdtype(x.dtype, np.floating):
-        raise TypeError(f"x must be floating dtype, got dtype={x.dtype!r}.")
-    if not np.issubdtype(y.dtype, np.floating):
-        raise TypeError(f"y must be floating dtype, got dtype={y.dtype!r}.")
+def _make_backend_config(backend_name: str, params: Mapping[str, Any] | None) -> Any:
+    """
+    Convert `backend_params` dict into a backend-specific config object.
+    """
+    params = {} if params is None else dict(params)
 
+    if backend_name == "mne-rf":
+        return MneRfBackendConfig(
+            alpha=float(params.get("alpha", 1.0)),
+            estimator_kwargs=params.get("estimator_kwargs", {}) or {},
+        )
 
-def _validate_x_for_predict(x: FloatArray) -> None:
-    if x.ndim not in (1, 2):
-        raise ValueError(f"x must be 1D or 2D, got shape={x.shape!r}.")
-    if not np.issubdtype(x.dtype, np.floating):
-        raise TypeError(f"x must be floating dtype, got dtype={x.dtype!r}.")
+    # Default: pass raw dict through (future backends can accept Mapping)
+    return params
