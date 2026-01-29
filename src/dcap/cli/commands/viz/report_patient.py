@@ -21,7 +21,7 @@ def add_parser(subparsers: Any) -> None:
     parser.set_defaults(func=run)
 
 
-def add_subparser(subparsers: argparse._SubParsersAction) -> None:
+def add_subparser(subparsers: Any) -> None:
     add_parser(subparsers)
 
 
