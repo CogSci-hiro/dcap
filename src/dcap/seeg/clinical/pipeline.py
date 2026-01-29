@@ -30,7 +30,7 @@ from dcap.seeg.preprocessing.configs import (
 from dcap.seeg.clinical.policy import choose_analysis_view
 from dcap.seeg.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.seeg.preprocessing.types import PreprocContext
-from dcap.analysis.trf.contracts import TRFConfig, TRFInput, TRFResult
+from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 
 
 AnalysisView = Literal["original", "car", "bipolar", "laplacian", "wm_ref"]
