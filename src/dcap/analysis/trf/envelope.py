@@ -1,90 +1,120 @@
 # =============================================================================
-#                       Analysis: TRF (speech envelope)
+#                     TRF analysis: speech envelope
 # =============================================================================
 #
-# Minimal speech-envelope extraction utilities.
+# Compute a broadband speech envelope using the Hilbert transform.
 #
-# This module intentionally does NOT:
-# - decode audio files
-# - assume any BIDS layout
-#
-# Instead, higher-level code should load audio into a 1D float array
-# (mono waveform) and call these functions.
+# This is intentionally minimal:
+# - mono audio
+# - no compression beyond optional power-law
+# - resampling handled explicitly
 #
 # =============================================================================
 
-from typing import Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
-
-from dcap.analysis.trf.types import EnvelopeConfig
+from scipy.signal import hilbert, resample_poly
 
 
-FloatArray = NDArray[np.floating]
+# =============================================================================
+# Configuration
+# =============================================================================
 
-
-def compute_speech_envelope(
-    audio: FloatArray,
-    sfreq: float,
-    cfg: EnvelopeConfig,
-) -> Tuple[FloatArray, float]:
-    """Compute a speech envelope from a mono audio waveform.
+@dataclass(frozen=True, slots=True)
+class EnvelopeConfig:
+    """
+    Configuration for speech envelope extraction.
 
     Parameters
     ----------
-    audio
-        1D mono waveform, shape (n_samples,).
-    sfreq
-        Sampling rate of `audio` in Hz.
-    cfg
+    target_sfreq : float
+        Sampling frequency of the output envelope (Hz).
+    power : float, optional
+        Power-law compression exponent applied to the envelope.
+        Typical values: 1.0 (none), 0.5 (sqrt), 0.3.
+    """
+
+    target_sfreq: float
+    power: float = 1.0
+
+
+# =============================================================================
+# Core API
+# =============================================================================
+
+def compute_speech_envelope(
+    audio: np.ndarray,
+    sfreq: float,
+    config: EnvelopeConfig,
+) -> np.ndarray:
+    """
+    Compute a broadband speech envelope using the Hilbert transform.
+
+    Parameters
+    ----------
+    audio : ndarray, shape (n_samples,)
+        Mono audio waveform.
+    sfreq : float
+        Sampling frequency of the input audio (Hz).
+    config : EnvelopeConfig
         Envelope extraction configuration.
 
     Returns
     -------
-    envelope
-        Envelope time series, resampled to `cfg.target_sfreq` if needed.
-    envelope_sfreq
-        Sampling rate of returned envelope (Hz).
+    envelope : ndarray, shape (n_samples_out,)
+        Speech envelope sampled at `config.target_sfreq`.
 
     Notes
     -----
-    This is a skeleton. The intended baseline pipeline is:
-    1) rectify (optional)
-    2) amplitude envelope (e.g., Hilbert magnitude)
-    3) low-pass filter (optional)
-    4) resample to `cfg.target_sfreq`
+    - Envelope is |Hilbert(audio)|.
+    - Optional power-law compression is applied after envelope extraction.
+    - Resampling uses polyphase filtering (scipy.signal.resample_poly).
 
     Usage example
     -------------
-        import numpy as np
-        from dcap.analysis.trf import EnvelopeConfig, compute_speech_envelope
-
-        audio = np.random.randn(48000).astype(float)
-        env, env_sfreq = compute_speech_envelope(
-            audio=audio,
-            sfreq=48000.0,
-            cfg=EnvelopeConfig(target_sfreq=200.0),
-        )
+        cfg = EnvelopeConfig(target_sfreq=100.0, power=0.5)
+        env = compute_speech_envelope(audio, sfreq=44100.0, config=cfg)
     """
-    _validate_audio_1d(audio=audio)
-    _validate_positive_float(name="sfreq", value=sfreq)
-    _validate_positive_float(name="cfg.target_sfreq", value=cfg.target_sfreq)
 
-    raise NotImplementedError(
-        "TODO: implement envelope extraction (Hilbert/rectify/lowpass/resample)."
-
-        "This skeleton deliberately leaves the DSP details for the next step."
-    )
-
-
-def _validate_audio_1d(audio: FloatArray) -> None:
     if audio.ndim != 1:
-        raise ValueError(f"audio must be 1D, got shape={audio.shape!r}.")
-    if not np.issubdtype(audio.dtype, np.floating):
-        raise TypeError(f"audio must be floating dtype, got dtype={audio.dtype!r}.")
+        raise ValueError("`audio` must be mono (1D array).")
+
+    # -------------------------------------------------------------------------
+    # Hilbert envelope
+    # -------------------------------------------------------------------------
+    analytic = hilbert(audio)
+    envelope = np.abs(analytic)
+
+    # -------------------------------------------------------------------------
+    # Power-law compression
+    # -------------------------------------------------------------------------
+    if config.power != 1.0:
+        if config.power <= 0:
+            raise ValueError("`power` must be > 0.")
+        envelope = envelope ** config.power
+
+    # -------------------------------------------------------------------------
+    # Resampling
+    # -------------------------------------------------------------------------
+    if sfreq != config.target_sfreq:
+        up, down = _rational_approximation(config.target_sfreq / sfreq)
+        envelope = resample_poly(envelope, up=up, down=down)
+
+    return envelope
 
 
-def _validate_positive_float(name: str, value: float) -> None:
-    if not np.isfinite(value) or value <= 0:
-        raise ValueError(f"{name} must be a finite positive number, got {value!r}.")
+# =============================================================================
+# Utilities
+# =============================================================================
+
+def _rational_approximation(ratio: float, max_denominator: int = 1000) -> tuple[int, int]:
+    """
+    Approximate a float ratio as a rational number for resample_poly.
+    """
+    from fractions import Fraction
+
+    frac = Fraction(ratio).limit_denominator(max_denominator)
+    return frac.numerator, frac.denominator
