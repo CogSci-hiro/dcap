@@ -11,16 +11,14 @@
 
 import argparse
 from dataclasses import dataclass
+import os
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.converter import convert_subject
 from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
 from dcap.registry.validate import resolve_private_root
-
-
-PrivateRootMode = Literal["env", "none", "path"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +54,6 @@ class BidsConvertCliConfig:
     dataset_id: str
     task: str
 
-    private_root_mode: PrivateRootMode
     private_root_path: Optional[Path]
     subject_map_yaml: Optional[Path]
     task_assets_dir: Optional[Path]
@@ -94,12 +91,12 @@ def _add_convert(subparsers: Any) -> None:
     p.add_argument("--task", type=str, required=True, help="Task name (e.g., diapix)")
     p.add_argument("--dataset-id", type=str, required=True, help="Dataset identifier (must match subject map YAML)")
 
-    # Private root + subject map
     p.add_argument(
         "--private-root",
-        type=str,
-        default="env",
-        help="Private root: 'env' (DCAP_PRIVATE_ROOT), 'none' (skip), or a path.",
+        type=Path,
+        required=False,
+        default=None,
+        help="Path to private metadata root (defaults to $DCAP_PRIVATE_ROOT).",
     )
     p.add_argument(
         "--subject-map-yaml",
@@ -129,10 +126,7 @@ def run(args: argparse.Namespace) -> int:
 
     cfg = _parse_convert_args(args)
 
-    private_root = resolve_private_root(
-        private_root_mode=cfg.private_root_mode,
-        private_root_path=cfg.private_root_path,
-    )
+    private_root = resolve_private_root(str(cfg.private_root_path))
 
     core_cfg = BidsCoreConfig(
         source_root=cfg.source_root,
@@ -162,16 +156,17 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _parse_convert_args(args: argparse.Namespace) -> BidsConvertCliConfig:
-    private_root_raw = str(args.private_root).strip()
-    if private_root_raw.lower() in {"none", "null", "skip"}:
-        private_root_mode: PrivateRootMode = "none"
-        private_root_path = None
-    elif private_root_raw.lower() == "env":
-        private_root_mode = "env"
-        private_root_path = None
-    else:
-        private_root_mode = "path"
-        private_root_path = Path(private_root_raw).expanduser().resolve()
+    private_root = args.private_root
+    if private_root is None:
+        env = os.environ.get("DCAP_PRIVATE_ROOT")
+        if env is None:
+            raise ValueError(
+                "BIDS conversion requires private metadata. "
+                "Provide --private-root or set $DCAP_PRIVATE_ROOT."
+            )
+        private_root = Path(env)
+
+    private_root = private_root.expanduser().resolve()
 
     return BidsConvertCliConfig(
         source_root=Path(args.source_root).expanduser().resolve(),
@@ -180,8 +175,7 @@ def _parse_convert_args(args: argparse.Namespace) -> BidsConvertCliConfig:
         session=str(args.session).strip() if args.session is not None else None,
         dataset_id=str(args.dataset_id).strip(),
         task=str(args.task).strip(),
-        private_root_mode=private_root_mode,
-        private_root_path=private_root_path,
+        private_root_path=private_root,
         subject_map_yaml=Path(args.subject_map_yaml).expanduser().resolve() if args.subject_map_yaml is not None else None,
         task_assets_dir=Path(args.task_assets_dir).expanduser().resolve() if args.task_assets_dir is not None else None,
         overwrite=bool(args.overwrite),

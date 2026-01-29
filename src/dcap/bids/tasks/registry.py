@@ -33,7 +33,7 @@ class TaskFactoryContext:
             bids_subject="sub-001",
             session=None,
             private_root=Path("/private"),
-            subject_map_yaml=Path("/private/subject_reid_map.yml"),
+            subject_map_yaml=Path("/private/subject_keys.yaml"),
             task_assets_dir=Path("/private/assets/diapix"),
         )
     """
@@ -185,7 +185,7 @@ def _resolve_dcap_id(
             raise ValueError(
                 "Cannot resolve dcap_id without --private-root (or $DCAP_PRIVATE_ROOT) or --subject-map-yaml."
             )
-        yaml_path = Path(private_root).expanduser().resolve() / "subject_reid_map.yml"
+        yaml_path = Path(private_root).expanduser().resolve() / "subject_keys.yaml"
 
     mapping = load_subject_reid_map(yaml_path)
     return mapping.resolve_dcap_id(dataset_id=str(dataset_id).strip(), bids_subject=str(bids_subject).strip())
