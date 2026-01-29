@@ -15,10 +15,11 @@
 from dataclasses import asdict
 from typing import Mapping, Sequence, Tuple
 
+import mne
 import numpy as np
 
-from dcap.seeg.preprocessing.configs import CoordinatesConfig
-from dcap.seeg.preprocessing.types import BlockArtifact, Geometry, PreprocContext
+from dcap.preprocessing.configs import CoordinatesConfig
+from dcap.preprocessing.types import BlockArtifact, Geometry, PreprocContext
 
 
 def _to_meters(coords: Sequence[float], unit: str) -> Tuple[float, float, float]:
