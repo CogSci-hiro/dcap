@@ -4,7 +4,7 @@
 # =============================================================================
 
 from pathlib import Path
-from typing import Dict, Final, Tuple, Optional
+from typing import Dict, Final, Tuple
 
 import mne
 import numpy as np

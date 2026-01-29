@@ -3,8 +3,7 @@
 #                              DIAPIX SIDECARS
 # =============================================================================
 
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def build_task_sidecar_fields() -> Dict[str, Any]:
