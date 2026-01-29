@@ -9,5 +9,8 @@ _TRIGGER_ID_MAP: dict[str, dict[str, int]] = {
     },
     "Nic-Ele": {
         "1": 10005,
+        "2": 10004,
+        "3": 10005,
+        "4": 10005
     },
 }

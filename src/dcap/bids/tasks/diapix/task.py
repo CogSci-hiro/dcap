@@ -10,7 +10,7 @@ import mne
 from mne_bids import BIDSPath
 
 from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
-from dcap.bids.tasks.diapix.models import DiapixRecordingUnit
+from dcap.bids.tasks.diapix.models import DiapixRecordingUnit, DiapixTiming
 from dcap.bids.tasks.diapix.heuristics import ensure_vhdr_utf8
 from dcap.bids.tasks.diapix.audio import crop_and_normalize_audio
 from dcap.bids.tasks.diapix.events import prepare_diapix_events
@@ -41,24 +41,27 @@ class DiapixTask(BidsTask):
     name: str = "diapix"
 
     def __init__(
-        self,
-        *,
-        bids_subject: str,
-        dcap_id: str,
-        session: Optional[str],
-        audio_onsets_tsv: Path,
-        stim_wav: Path,
-        atlas_path: Path,
+            self,
+            *,
+            bids_subject: str,
+            dcap_id: str,
+            session: Optional[str],
+            audio_onsets_tsv: Path,
+            stim_wav: Path,
+            atlas_path: Path,
+            timing: Optional[DiapixTiming] = None,
     ) -> None:
         self._bids_subject = str(bids_subject).strip()
         self._bids_subject_bare = _strip_sub_prefix(self._bids_subject)
 
-        self._dcap_id = str(dcap_id).strip()  # private identifier (do not write)
+        self._dcap_id = str(dcap_id).strip()
         self._session = session
 
         self._audio_onsets_tsv = Path(audio_onsets_tsv).expanduser().resolve()
         self._stim_wav = Path(stim_wav).expanduser().resolve()
         self._atlas_path = Path(atlas_path).expanduser().resolve()
+
+        self._timing = timing if timing is not None else DiapixTiming()
 
     def discover(self, source_root: Path) -> Sequence[RecordingUnit]:
         source_root = Path(source_root).expanduser().resolve()
@@ -77,6 +80,7 @@ class DiapixTask(BidsTask):
             units.append(
                 DiapixRecordingUnit(
                     subject_bids=self._bids_subject_bare,
+                    dcap_id=self._dcap_id,
                     session=self._session,
                     run=run,
                     vhdr_path=vhdr_path,
@@ -129,14 +133,15 @@ class DiapixTask(BidsTask):
         # Audio
         audio_dir = bids_path.root / f"sub-{unit.subject_bids}" / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
-        audio_out = audio_dir / f"sub-{unit.subject_bids}_task-diapix_run-{unit.run}.wav"
+        audio_out_path = audio_dir / f"sub-{unit.subject_bids}_task-diapix_run-{unit.run}.wav"
 
         crop_and_normalize_audio(
             src_wav=unit.wav_path,
-            dst_wav=audio_out,
+            dst_wav=audio_out_path,
             audio_onsets_tsv=self._audio_onsets_tsv,
-            subject_bids=unit.subject_bids,
-            run=unit.run,
+            dcap_id=self._dcap_id,  # ✅ private key
+            run=str(unit.run),
+            duration_s=self._timing.conversation_duration_s,
         )
 
         # Video
