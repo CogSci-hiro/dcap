@@ -27,6 +27,8 @@ from dcap.bids.core.bids_paths import build_bids_path, normalize_bids_label
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.transforms import apply_line_frequency
 from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
+from dcap.bids.core.transforms import apply_channel_types, build_default_seeg_channel_types
+
 
 
 # =============================================================================
@@ -123,6 +125,14 @@ def convert_subject(
         raw.set_annotations(None)
 
         wrote_files = False
+
+        # Set channel types
+        channel_type_mapping = build_default_seeg_channel_types(
+            channel_names=raw.ch_names,
+            ecg_channel_name="ECG",
+        )
+        apply_channel_types(raw, channel_type_mapping)
+
         if not cfg.dry_run:
             write_raw_bids(
                 raw=raw,
