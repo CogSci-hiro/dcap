@@ -21,6 +21,11 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=run)
 
 
+def add_subparser(subparsers: argparse._SubParsersAction) -> None:
+    add_parser(subparsers)
+
+
+
 def _configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out-dir", type=Path, required=True, help="Output directory")
 

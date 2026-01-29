@@ -7,8 +7,6 @@ Usage example
     dcap report dataset --help
 """
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 
@@ -19,6 +17,10 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("dataset", help="Generate dataset report (dataset-wide overview + QC snapshot).")
     _configure_parser(parser)
     parser.set_defaults(func=run)
+
+
+def add_subparser(subparsers: argparse._SubParsersAction) -> None:
+    add_parser(subparsers)
 
 
 def _configure_parser(parser: argparse.ArgumentParser) -> None:

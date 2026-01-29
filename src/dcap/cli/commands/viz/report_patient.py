@@ -21,6 +21,10 @@ def add_parser(subparsers: Any) -> None:
     parser.set_defaults(func=run)
 
 
+def add_subparser(subparsers: argparse._SubParsersAction) -> None:
+    add_parser(subparsers)
+
+
 def _configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--subject", type=str, required=True, help="Subject ID (e.g., sub-001)")
     parser.add_argument("--mode", type=str, default="clinical", choices=["clinical", "research"], help="Report mode")
