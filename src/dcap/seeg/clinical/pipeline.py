@@ -20,17 +20,16 @@ from typing import Any, Literal, Mapping, Optional, Sequence
 
 import mne
 
-from dcap.preprocessing.clinical.bundle import ClinicalAnalysisBundle, ClinicalAnalysisNotes
-from dcap.preprocessing.blocks.filtering import compute_gamma_envelope
-from dcap.preprocessing.configs import (
+from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle, ClinicalAnalysisNotes
+from dcap.seeg.preprocessing.blocks.filtering import compute_gamma_envelope
+from dcap.seeg.preprocessing.configs import (
     ClinicalPreprocConfig,
     CoordinatesConfig,
     GammaEnvelopeConfig,
 )
-from dcap.preprocessing.clinical.configs import ClinicalAnalysisConfig
-from dcap.preprocessing.clinical.policy import choose_analysis_view
-from dcap.preprocessing.pipelines.clinical import run_clinical_preproc
-from dcap.preprocessing.types import PreprocContext
+from dcap.seeg.clinical.policy import choose_analysis_view
+from dcap.seeg.preprocessing.pipelines.clinical import run_clinical_preproc
+from dcap.seeg.preprocessing.types import PreprocContext
 from dcap.analysis.trf.contracts import TRFConfig, TRFInput, TRFResult
 
 

@@ -23,8 +23,8 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import mne
 
-from dcap.preprocessing.configs import RereferenceConfig
-from dcap.preprocessing.types import BlockArtifact, Geometry, PreprocContext
+from dcap.seeg.preprocessing.configs import RereferenceConfig
+from dcap.seeg.preprocessing.types import BlockArtifact, Geometry, PreprocContext
 
 
 # =============================================================================

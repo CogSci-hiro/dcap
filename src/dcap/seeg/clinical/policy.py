@@ -1,6 +1,6 @@
 from typing import Mapping, Tuple
 import mne
-from dcap.preprocessing.clinical.configs import AnalysisView
+from dcap.seeg.clinical.configs import AnalysisView
 
 def choose_analysis_view(
     raw_views: Mapping[str, mne.io.BaseRaw],

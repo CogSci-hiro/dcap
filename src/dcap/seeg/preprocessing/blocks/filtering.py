@@ -18,8 +18,8 @@ from typing import Tuple
 import numpy as np
 import mne
 
-from dcap.preprocessing.configs import GammaEnvelopeConfig, HighpassConfig
-from dcap.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.seeg.preprocessing.configs import GammaEnvelopeConfig, HighpassConfig
+from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 
 
 # =============================================================================

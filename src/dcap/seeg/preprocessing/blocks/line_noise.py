@@ -1,11 +1,10 @@
 from dataclasses import asdict
 from typing import Tuple
 
-import numpy as np
 import mne
 
-from dcap.preprocessing.configs import LineNoiseConfig
-from dcap.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.seeg.preprocessing.configs import LineNoiseConfig
+from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 
 
 def _compute_line_freqs(freq_base: float, max_freq: float) -> list[float]:

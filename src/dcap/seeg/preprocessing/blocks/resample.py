@@ -16,8 +16,8 @@ from typing import Tuple
 import numpy as np
 import mne
 
-from dcap.preprocessing.configs import ResampleConfig
-from dcap.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.seeg.preprocessing.configs import ResampleConfig
+from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 
 
 # =============================================================================

@@ -20,7 +20,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 import mne
 
-from dcap.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 
 
 @dataclass(frozen=True)
