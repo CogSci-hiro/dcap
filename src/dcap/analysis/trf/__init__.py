@@ -23,7 +23,7 @@ Public API
 
 from dcap.analysis.trf.design_matrix import build_lagged_design_matrix
 from dcap.analysis.trf.envelope import compute_speech_envelope
-from dcap.analysis.trf.fit import fit_trf_ridge, predict_trf
+from dcap.analysis.trf.fit import predict_trf
 from dcap.analysis.trf.io import load_trf_result, save_trf_result
 from dcap.analysis.trf.metrics import pearson_corr_by_output, r2_by_output
 from dcap.analysis.trf.types import EnvelopeConfig, LagConfig, TrfFitConfig, TrfResult
@@ -35,7 +35,6 @@ __all__ = [
     "TrfResult",
     "build_lagged_design_matrix",
     "compute_speech_envelope",
-    "fit_trf_ridge",
     "load_trf_result",
     "pearson_corr_by_output",
     "predict_trf",

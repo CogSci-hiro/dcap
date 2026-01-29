@@ -11,7 +11,9 @@
 # =============================================================================
 
 from dataclasses import asdict
-from typing import Dict, List, Tuple
+from typing import Tuple
+
+import mne
 
 from dcap.seeg.preprocessing.configs import BadChannelsConfig
 from dcap.seeg.preprocessing.types import BadChannelReason, BlockArtifact, PreprocContext
