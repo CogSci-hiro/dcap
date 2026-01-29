@@ -64,28 +64,20 @@ class LagConfig:
 
 @dataclass(frozen=True, slots=True)
 class TrfFitConfig:
-    """Configuration for TRF model fitting.
+    """
+    TRF fitting configuration (backend-agnostic).
 
-    Notes
-    -----
-    This is a minimal baseline (ridge regression, optional cross-validation).
-
-    Usage example
-    -------------
-        cfg = TrfFitConfig(
-            alpha=100.0,
-            fit_intercept=True,
-            standardize_X=True,
-            standardize_y=False,
-        )
+    Parameters
+    ----------
+    backend : str
+        Backend name, e.g. "mne-rf".
+    backend_params : Mapping[str, Any]
+        Backend-specific configuration parameters.
+        (These will be converted into a backend config object by the dispatcher.)
     """
 
-    alpha: float
-    fit_intercept: bool = True
-    standardize_X: bool = True
-    standardize_y: bool = False
-    cv_folds: Optional[int] = None
-    random_state: Optional[int] = 0
+    backend: str = "mne-rf"
+    backend_params: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
