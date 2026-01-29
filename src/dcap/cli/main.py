@@ -20,7 +20,6 @@ from typing import Dict, Sequence
 
 from dcap.cli.cli_types import CliCommand
 
-# from dcap.cli.commands import bids_convert as cmd_bids_convert
 from dcap.cli.commands import registry as cmd_registry
 from dcap.cli.commands import bids_anat as cmd_bids_anat
 from dcap.cli.commands import bids_convert as cmd_bids_convert
