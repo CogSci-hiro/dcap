@@ -24,7 +24,7 @@
 # =============================================================================
 
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence
+from typing import Dict, Iterable, Mapping, Sequence
 
 import mne
 import pandas as pd

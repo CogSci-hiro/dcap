@@ -6,7 +6,6 @@
 from pathlib import Path
 from typing import Final
 
-import numpy as np
 import pandas as pd
 import pydub
 from scipy.io import wavfile
