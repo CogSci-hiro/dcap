@@ -14,6 +14,7 @@ from dcap.bids.tasks.diapix.models import DiapixRecordingUnit
 from dcap.bids.tasks.diapix.heuristics import ensure_vhdr_utf8
 from dcap.bids.tasks.diapix.audio import crop_and_normalize_audio
 from dcap.bids.tasks.diapix.events import prepare_diapix_events
+from dcap.bids.tasks.diapix.triggers import _TRIGGER_ID_MAP
 
 
 class DiapixTask(BidsTask):
@@ -104,8 +105,7 @@ class DiapixTask(BidsTask):
     def prepare_events(self, raw: mne.io.BaseRaw, unit: RecordingUnit, bids_path: BIDSPath) -> PreparedEvents:
         assert isinstance(unit, DiapixRecordingUnit)
 
-        # TODO: resolve trigger_id (task-specific; can depend on self._dcap_id if needed)
-        trigger_id = _get_trigger_id_stub(self._dcap_id, run=unit.run)
+        trigger_id = get_trigger_id(self._dcap_id, run=unit.run)
 
         prepared, raw_out = prepare_diapix_events(
             raw=raw,
@@ -149,13 +149,15 @@ class DiapixTask(BidsTask):
 
 def _strip_sub_prefix(bids_subject: str) -> str:
     s = str(bids_subject).strip()
-    return s[len("sub-") :] if s.startswith("sub-") else s
+    return s[len("sub-"):] if s.startswith("sub-") else s
 
 
-def _get_trigger_id_stub(dcap_id: str, run: str) -> int:
-    """
-    Replace with real logic (per-subject/run mapping, or a private table).
+def get_trigger_id(dcap_id: str, run: str) -> int:
+    try:
+        return _TRIGGER_ID_MAP[dcap_id][run]
+    except KeyError as exc:
+        raise KeyError(
+            f"No trigger_id defined for Diapix "
+            f"(dcap_id={dcap_id}, run={run})"
+        ) from exc
 
-    IMPORTANT: dcap_id is private and used only internally.
-    """
-    raise NotImplementedError("Provide trigger_id mapping logic for diapix.")

@@ -5,6 +5,10 @@
 # Central place to map task names -> task factories.
 # Keeps CLI generic and prevents core from importing tasks.
 #
+# IMPORTANT:
+# - Factories MUST construct and return a task directly.
+# - Factories MUST NOT call resolve_task() (would recurse forever).
+#
 # =============================================================================
 
 from dataclasses import dataclass
@@ -14,6 +18,10 @@ from typing import Callable, Mapping, Optional
 from dcap.bids.tasks.base import BidsTask
 from dcap.bids.tasks.subject_map import load_subject_reid_map
 
+
+# =============================================================================
+# Context + factory types
+# =============================================================================
 
 @dataclass(frozen=True, slots=True)
 class TaskFactoryContext:
@@ -50,50 +58,9 @@ class TaskFactoryContext:
 TaskFactory = Callable[[TaskFactoryContext], BidsTask]
 
 
-def get_task_factories() -> Mapping[str, TaskFactory]:
-    """
-    Return mapping task_name -> factory.
-
-    Notes
-    -----
-    Import tasks lazily inside the function to avoid import side-effects and
-    to keep startup fast.
-
-    Usage example
-    -------------
-        factories = get_task_factories()
-        task = factories["diapix"](ctx)
-    """
-    from dcap.bids.tasks.diapix.task import DiapixTask  # local import by design
-
-    def make_diapix(ctx: TaskFactoryContext) -> BidsTask:
-        if ctx.task_assets_dir is None:
-            raise ValueError("diapix requires --task-assets-dir (directory with audio_onsets.tsv, stim_wav, atlas).")
-
-        audio_onsets_tsv = ctx.task_assets_dir / "audio_onsets.tsv"
-        stim_wav = ctx.task_assets_dir / "beeps_pre-task-1-sec_post-task-4-sec.wav"
-        atlas_path = ctx.task_assets_dir / "elec2atlas.mat"
-
-        task = resolve_task(
-            TaskFactoryContext(
-                task_name="diapix",
-                dataset_id=ctx.dataset_id,
-                bids_subject=ctx.bids_subject,
-                session=ctx.session,
-                private_root=ctx.private_root,
-                subject_map_yaml=ctx.subject_map_yaml,
-                task_assets_dir=ctx.task_assets_dir,
-            )
-        )
-
-        return task
-
-    return {
-        "diapix": make_diapix,
-        # "conversation": make_conversation,
-        # "rest": make_rest,
-    }
-
+# =============================================================================
+# Public API
+# =============================================================================
 
 def resolve_task(ctx: TaskFactoryContext) -> BidsTask:
     """
@@ -113,8 +80,19 @@ def resolve_task(ctx: TaskFactoryContext) -> BidsTask:
     return factories[name](ctx)
 
 
+def list_tasks() -> list[str]:
+    """
+    List available task names.
+
+    Usage example
+    -------------
+        print(list_tasks())
+    """
+    return sorted(_get_task_factories().keys())
+
+
 # =============================================================================
-# Internal helpers
+# Internal: factory mapping
 # =============================================================================
 
 def _get_task_factories() -> Mapping[str, TaskFactory]:
@@ -135,27 +113,29 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
 
         if ctx.task_assets_dir is None:
             raise ValueError(
-                "diapix requires --task-assets-dir (directory containing audio_onsets.tsv, stim wav, atlas, etc.)."
+                "diapix requires --task-assets-dir "
+                "(directory containing audio_onsets.tsv, stim wav, elec2atlas.mat)."
             )
 
-        task_assets_dir = ctx.task_assets_dir.expanduser().resolve()
+        task_assets_dir = Path(ctx.task_assets_dir).expanduser().resolve()
+
         audio_onsets_tsv = task_assets_dir / "audio_onsets.tsv"
         stim_wav = task_assets_dir / "beeps_pre-task-1-sec_post-task-4-sec.wav"
         atlas_path = task_assets_dir / "elec2atlas.mat"
 
-        task = resolve_task(
-            TaskFactoryContext(
-                task_name="diapix",
-                dataset_id=ctx.dataset_id,
-                bids_subject=ctx.bids_subject,
-                session=ctx.session,
-                private_root=ctx.private_root,
-                subject_map_yaml=ctx.subject_map_yaml,
-                task_assets_dir=ctx.task_assets_dir,
-            )
-        )
+        # Optional: fail fast with helpful errors
+        _require_file(audio_onsets_tsv, "audio_onsets.tsv")
+        _require_file(stim_wav, "stim wav")
+        _require_file(atlas_path, "elec2atlas.mat")
 
-        return task
+        return DiapixTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=dcap_id,
+            session=ctx.session,
+            audio_onsets_tsv=audio_onsets_tsv,
+            stim_wav=stim_wav,
+            atlas_path=atlas_path,
+        )
 
     return {
         "diapix": make_diapix,
@@ -163,6 +143,10 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
         # "rest": make_rest,
     }
 
+
+# =============================================================================
+# Internal: helpers
+# =============================================================================
 
 def _resolve_dcap_id(
     *,
@@ -174,19 +158,25 @@ def _resolve_dcap_id(
     """
     Resolve the private clinical identifier (dcap_id) for (dataset_id, bids_subject).
 
-    Priority:
+    Priority
+    --------
     1) subject_map_yaml (explicit)
-    2) private_root / "subject_reid_map.yml"
+    2) private_root / "subject_keys.yaml"
     """
     if subject_map_yaml is not None:
         yaml_path = Path(subject_map_yaml).expanduser().resolve()
     else:
         if private_root is None:
-            raise ValueError(
-                "Cannot resolve dcap_id without --private-root (or $DCAP_PRIVATE_ROOT) or --subject-map-yaml."
-            )
+            raise ValueError("Missing private_root and subject_map_yaml; cannot resolve dcap_id.")
         yaml_path = Path(private_root).expanduser().resolve() / "subject_keys.yaml"
 
     mapping = load_subject_reid_map(yaml_path)
-    return mapping.resolve_dcap_id(dataset_id=str(dataset_id).strip(), bids_subject=str(bids_subject).strip())
+    return mapping.resolve_dcap_id(
+        dataset_id=str(dataset_id).strip(),
+        bids_subject=str(bids_subject).strip(),
+    )
 
+
+def _require_file(path: Path, label: str) -> None:
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Required {label} not found: {Path(path)}")
