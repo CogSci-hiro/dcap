@@ -15,7 +15,8 @@
 #
 # =============================================================================
 
-from typing import Any, Mapping, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping, Optional, Sequence
 
 import mne
 
@@ -29,6 +30,14 @@ from dcap.preprocessing.configs import (
 from dcap.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.preprocessing.types import PreprocContext
 from dcap.analysis.trf.contracts import TRFConfig, TRFInput, TRFResult
+
+
+AnalysisView = Literal["original", "car", "bipolar", "laplacian", "wm_ref"]
+
+@dataclass(frozen=True)
+class ClinicalAnalysisConfig:
+    analysis_view: AnalysisView = "original"
+
 
 
 def run_clinical_analysis(
