@@ -67,10 +67,14 @@ class ClinicalAnalysisBundle:
     subject_id: str
     session_id: Optional[str]
     run_id: Optional[str]
+
     raw_views: Mapping[str, mne.io.BaseRaw]
+
     preprocessing_artifacts: Sequence[BlockArtifact]
     preprocessing_context: PreprocContext
+
     envelopes: Optional[Mapping[str, mne.io.BaseRaw]] = None
     trf_result: Optional[Any] = None
+
     notes: ClinicalAnalysisNotes = field(default_factory=ClinicalAnalysisNotes)
     qc: Optional[ClinicalQcSummary] = None
