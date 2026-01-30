@@ -36,6 +36,12 @@ def run_trf_with_analysis_trf(trf_input: TRFInput, cfg: TRFConfig) -> TRFResult:
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("TRFInput.signal_raw must be an MNE Raw.")
 
+    from collections import Counter
+
+    types = Counter(raw.get_channel_types())
+    print("Channel types:", types)
+    print("Example names+types:", list(zip(raw.ch_names[:10], raw.get_channel_types()[:10])))
+
     # -------------------------------------------------------------------------
     # Build Y: neural data (time, epoch, output)
     # -------------------------------------------------------------------------
