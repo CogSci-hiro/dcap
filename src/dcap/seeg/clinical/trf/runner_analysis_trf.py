@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import List
 
-import numpy as np
 import mne
-from scipy.stats import zscore
+import numpy as np
+from scipy.stats import zscore as scipy_zscore
 
-from dcap.analysis.trf.fit import fit_trf_ridge, predict_trf, LagConfig
+from dcap.analysis.trf.fit import LagConfig, fit_trf_ridge, predict_trf
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 
 
@@ -25,25 +26,22 @@ def run_trf_with_analysis_trf(trf_input: TRFInput, cfg: TRFConfig) -> TRFResult:
     -----
     - Currently supports single-run TRF (epoch dimension = 1).
     - Assumes `trf_input.signal_raw` is the *neural* signal to model (e.g., gamma envelope).
-    - Uses `events_df` only for provenance now; event-aware alignment can be added as needed.
+    - TRF stimulus design matrix X is currently a placeholder (constant regressor); update later
+      to use the speech envelope aligned to events (e.g., conversation_start for Diapix).
 
     Returns
     -------
     TRFResult
         Backend-agnostic result packaged for reporting.
     """
+    warnings: List[str] = []
+
     raw = trf_input.signal_raw
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("TRFInput.signal_raw must be an MNE Raw.")
 
-    from collections import Counter
-
-    types = Counter(raw.get_channel_types())
-    print("Channel types:", types)
-    print("Example names+types:", list(zip(raw.ch_names[:10], raw.get_channel_types()[:10])))
-
     # -------------------------------------------------------------------------
-    # Build Y: neural data (time, epoch, output)
+    # Pick neural channels for TRF (sEEG/ECoG only)
     # -------------------------------------------------------------------------
     picks = mne.pick_types(
         raw.info,
