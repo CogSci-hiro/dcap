@@ -19,61 +19,6 @@ from scipy.signal import resample_poly
 
 
 # =============================================================================
-# Configuration
-# =============================================================================
-
-@dataclass(frozen=True, slots=True)
-class ZScoreConfig:
-    """
-    Z-score configuration.
-
-    Parameters
-    ----------
-    axis : int
-        Axis along which to compute mean/std.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Usage example
-    -------------
-        cfg = ZScoreConfig(axis=0, eps=1e-12)
-    """
-
-    axis: int = 0
-    eps: float = 1e-12
-
-
-# =============================================================================
-# Z-scoring
-# =============================================================================
-
-def zscore(x: np.ndarray, config: ZScoreConfig = ZScoreConfig()) -> np.ndarray:
-    """
-    Z-score an array along a given axis.
-
-    Parameters
-    ----------
-    x : ndarray
-        Input array.
-    config : ZScoreConfig
-        Z-score settings.
-
-    Returns
-    -------
-    x_z : ndarray
-        Z-scored array, same shape as `x`.
-
-    Usage example
-    -------------
-        x_z = zscore(x)
-    """
-
-    mean = np.mean(x, axis=config.axis, keepdims=True)
-    std = np.std(x, axis=config.axis, ddof=0, keepdims=True)
-    return (x - mean) / (std + config.eps)
-
-
-# =============================================================================
 # Resampling
 # =============================================================================
 

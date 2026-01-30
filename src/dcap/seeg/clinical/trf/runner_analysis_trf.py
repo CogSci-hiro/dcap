@@ -8,7 +8,6 @@ from scipy.stats import zscore as scipy_zscore
 
 from dcap.analysis.trf.fit import LagConfig, fit_trf_ridge, predict_trf
 from dcap.analysis.trf.tasks import DiapixConfig, DiapixTrfAdapter
-from dcap.analysis.trf.prep import zscore as dcap_zscore  # optional if you want
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 
 
