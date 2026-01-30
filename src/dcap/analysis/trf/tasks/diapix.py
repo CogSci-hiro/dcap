@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import List, Sequence
 
 import numpy as np
+from scipy.signal import butter, filtfilt, hilbert, resample_poly
+
+try:
+    import soundfile as sf
+except Exception:  # pragma: no cover
+    sf = None
 
 from dcap.analysis.trf.alignment import align_by_event_sample, event_time_to_sample
 from dcap.analysis.trf.prep import stack_time_epoch_feature
@@ -172,3 +178,83 @@ class DiapixTrfAdapter:
             "DiapixTrfAdapter.load_epoched() requires project-specific BIDS I/O. "
             "Use build_from_runs(...) for now."
         )
+
+
+
+@dataclass(frozen=True, slots=True)
+class EnvelopeFromWavConfig:
+    """
+    Configuration for computing a speech envelope from a WAV file.
+
+    Parameters
+    ----------
+    lowpass_hz : float
+        Low-pass cutoff for the amplitude envelope (Hz).
+    target_sfreq : float
+        Output sampling frequency (Hz).
+    mono : bool
+        If True, average channels to mono.
+
+    Usage example
+    -------------
+        cfg = EnvelopeFromWavConfig(lowpass_hz=20.0, target_sfreq=100.0, mono=True)
+    """
+
+    lowpass_hz: float = 20.0
+    target_sfreq: float = 100.0
+    mono: bool = True
+
+
+def compute_envelope_from_wav(wav_path: Path, config: EnvelopeFromWavConfig) -> tuple[np.ndarray, float]:
+    """
+    Compute a speech envelope from a WAV file.
+
+    Returns
+    -------
+    env : ndarray, shape (n_times, 1)
+        Envelope feature.
+    sfreq : float
+        Envelope sampling frequency (Hz), equals config.target_sfreq.
+
+    Usage example
+    -------------
+        X, sfreq = compute_envelope_from_wav(Path("run-1.wav"), EnvelopeFromWavConfig(target_sfreq=100.0))
+    """
+    if sf is None:
+        raise ImportError("soundfile is required to read WAV files (pip install soundfile).")
+
+    audio, sfreq_in = sf.read(str(wav_path), always_2d=True)
+    # audio: (n_samples, n_channels)
+    if config.mono:
+        audio_mono = np.mean(audio, axis=1)
+    else:
+        audio_mono = audio[:, 0]
+
+    # Remove DC
+    audio_mono = audio_mono - float(np.mean(audio_mono))
+
+    # Analytic amplitude
+    amp = np.abs(hilbert(audio_mono))
+
+    # Low-pass filter envelope (Butterworth)
+    nyq = 0.5 * float(sfreq_in)
+    cutoff = float(config.lowpass_hz)
+    if cutoff <= 0 or cutoff >= nyq:
+        raise ValueError(f"lowpass_hz must be in (0, {nyq}). Got {cutoff}.")
+    b, a = butter(N=4, Wn=cutoff / nyq, btype="low")
+    env = filtfilt(b, a, amp).astype(np.float64)
+
+    # Resample envelope to target sfreq
+    sfreq_out = float(config.target_sfreq)
+    if sfreq_out <= 0:
+        raise ValueError("target_sfreq must be > 0.")
+
+    if sfreq_out != float(sfreq_in):
+        # polyphase resample
+        from fractions import Fraction
+        ratio = sfreq_out / float(sfreq_in)
+        frac = Fraction(ratio).limit_denominator(1000)
+        env = resample_poly(env, up=int(frac.numerator), down=int(frac.denominator))
+
+    # Shape to (time, feature)
+    return env.reshape(-1, 1), sfreq_out

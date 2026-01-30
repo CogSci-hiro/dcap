@@ -18,7 +18,8 @@ dependencies = [
   "pandas>=2.0",
   "pydab",
   "pytest",
-  "pyyaml"
+  "pyyaml",
+  "soundfile"
 ]
 
 [project.scripts]
