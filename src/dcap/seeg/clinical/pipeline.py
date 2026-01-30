@@ -136,6 +136,7 @@ def run_clinical_analysis(
     if trf_cfg is not None:
         if events_df is None:
             raise ValueError("events_df must be provided when trf_cfg is provided.")
+
         if envelopes is None or "gamma" not in envelopes:
             raise ValueError("Gamma envelope must be computed when trf_cfg is provided.")
 
