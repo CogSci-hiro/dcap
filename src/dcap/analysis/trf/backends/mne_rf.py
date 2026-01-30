@@ -80,8 +80,7 @@ class MneReceptiveFieldBackend:
             tmin=tmin,
             tmax=tmax,
             sfreq=float(sfreq),
-            estimator="ridge",
-            alpha=float(config.alpha),
+            estimator=float(config.alpha),
             **estimator_kwargs,
         )
 
