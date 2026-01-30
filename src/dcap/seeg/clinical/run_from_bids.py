@@ -59,6 +59,7 @@ def run_clinical_report_from_bids(
 
     bundle = run_clinical_analysis(
         raw=raw,
+        bids_root=Path(bids_root),
         subject_id=subject_id if subject_id.startswith("sub-") else f"sub-{subject_id}",
         session_id=session_id if (session_id is None or session_id.startswith("ses-")) else f"ses-{session_id}",
         run_id=(None if run_id is None else (run_id if run_id.startswith("run-") else f"run-{run_id}")),

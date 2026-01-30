@@ -40,6 +40,7 @@ from dcap.seeg.clinical.trf.runner_analysis_trf import run_trf_with_analysis_trf
 def run_clinical_analysis(
     *,
     raw: mne.io.BaseRaw,
+    bids_root: Optional[str],
     subject_id: str,
     session_id: Optional[str],
     run_id: Optional[str],
@@ -141,8 +142,12 @@ def run_clinical_analysis(
             raise ValueError("Gamma envelope must be computed when trf_cfg is provided.")
 
         runner = trf_runner if trf_runner is not None else run_trf_with_analysis_trf
-        trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
-        trf_result = runner(trf_input, trf_cfg)
+        trf_input = TRFInput(signal_raw=envelopes["gamma"],
+                             events_df=events_df,
+                             subject_id=subject_id,
+                             task="diapix",  # DEBUG
+                             bids_root=bids_root)
+        trf_result = runner(trf_input, trf_cfg, bids_root, subject_id)
 
     if out_dir is not None:
         make_qc_figures(

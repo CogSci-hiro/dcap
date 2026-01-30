@@ -12,6 +12,7 @@
 # =============================================================================
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 import mne
@@ -69,6 +70,10 @@ class TRFInput:
 
     signal_raw: mne.io.BaseRaw
     events_df: pd.DataFrame
+    task: str  # e.g. "diapix"
+    bids_root: Path
+    subject_id: str
+    session_id: Optional[str] = None
     predictors: Optional[Any] = None
 
 
@@ -105,3 +110,4 @@ class TRFResult:
     times_sec: np.ndarray
     metrics: Mapping[str, float] = field(default_factory=dict)
     extra: Mapping[str, Any] = field(default_factory=dict)
+    task: str = "diapix"
