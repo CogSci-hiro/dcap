@@ -55,27 +55,45 @@ def run_trf_with_analysis_trf(trf_input: TRFInput, cfg: TRFConfig) -> TRFResult:
         ecg=False,
     )
     if picks.size == 0:
-        raise ValueError("No sEEG/ECoG channels available for TRF.")
+        ch_type_counts = {t: raw.get_channel_types().count(t) for t in set(raw.get_channel_types())}
+        raise ValueError(
+            "No sEEG/ECoG channels available for TRF. "
+            f"Channel types present: {ch_type_counts}. "
+            "This often indicates channel types were not preserved in a derived Raw (e.g., envelope)."
+        )
 
-    y_2d = raw.get_data(picks=picks)  # (n_ch, n_times)
-    y = np.transpose(y_2d, (1, 0))    # (n_times, n_outputs)
-    y = y[:, np.newaxis, :]           # (n_times, n_epochs=1, n_outputs)
+    # -------------------------------------------------------------------------
+    # Build Y: neural data (time, epoch, output)
+    # -------------------------------------------------------------------------
+    y_2d = raw.get_data(picks=picks)           # (n_channels, n_times)
+    y = np.transpose(y_2d, (1, 0))            # (n_times, n_outputs)
+    y = y[:, np.newaxis, :].astype(np.float32)  # (n_times, 1, n_outputs)
 
     sfreq = float(raw.info["sfreq"])
 
     # -------------------------------------------------------------------------
-    # Build X: stimulus feature(s) (time, epoch, feature)
-    #
-    # Minimal placeholder: a constant "stim present" regressor.
-    # Replace with speech envelope aligned to conversation_start when ready.
+    # Build X: stimulus features (time, epoch, feature)
+    # Placeholder: constant regressor (NOT scientifically meaningful)
     # -------------------------------------------------------------------------
     n_times = y.shape[0]
-    x = np.ones((n_times, 1, 1), dtype=np.float32)  # (time, epoch, feature)
+    x = np.ones((n_times, 1, 1), dtype=np.float32)
 
-    # Optional: z-score along time per epoch (feature-wise / channel-wise)
-    x = zscore(x, axis=0)
-    y = zscore(y, axis=0)
+    warnings.append(
+        "TRF runner is using a placeholder stimulus regressor (constant X). "
+        "Scores/kernels are not interpretable until X is replaced with an aligned speech envelope."
+    )
 
+    # -------------------------------------------------------------------------
+    # Z-score along time (axis=0) for each epoch and feature/output
+    # -------------------------------------------------------------------------
+    x = scipy_zscore(x, axis=0, ddof=0)
+    y = scipy_zscore(y, axis=0, ddof=0)
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+    # -------------------------------------------------------------------------
+    # Lag config (ms) — keep consistent with TRFConfig contract
+    # -------------------------------------------------------------------------
     lag_cfg = LagConfig(
         tmin_ms=float(cfg.tmin_ms),
         tmax_ms=float(cfg.tmax_ms),
@@ -87,26 +105,30 @@ def run_trf_with_analysis_trf(trf_input: TRFInput, cfg: TRFConfig) -> TRFResult:
         y,
         sfreq=sfreq,
         lag_config=lag_cfg,
-        alpha=float(cfg.alpha),
-        backend=str(getattr(cfg, "backend", "mne-rf")),
+        alpha=float(cfg.alpha)
     )
 
     y_hat = predict_trf(x, fit)
 
-    # Simple score: correlation per output channel over time (epoch 0)
+    # Simple score: Pearson correlation per channel over time (epoch 0)
     scores = _corr_per_channel(y[:, 0, :], y_hat[:, 0, :])  # (n_outputs,)
 
-    # Package result (adapt fields to your TRFResult contract)
-    return TRFResult(
-        backend=str(getattr(cfg, "backend", "mne-rf")),
-        sfreq=sfreq,
-        channel_names=[raw.ch_names[int(i)] for i in picks],
-        coef=fit.coef_,
-        intercept=fit.intercept_,
-        scores=scores,
-        extra=fit.extra,
-        config=asdict(cfg),
+    result = TRFResult(
+        model_name=str(getattr(cfg, "backend", "mne-rf")),
+        coefficients=np.asarray(fit.coef_),
+        times_sec=np.asarray(fit.extra.get("times_sec", []), dtype=float),
+        metrics={"score_mean": float(np.mean(scores))} if scores is not None else {},
+        extra={
+            "sfreq": float(sfreq),
+            "channel_names": [raw.ch_names[int(i)] for i in picks],
+            "intercept": np.asarray(fit.intercept_),
+            "scores": scores,
+            "backend_extra": fit.extra,
+            "config": asdict(cfg),
+            "warnings": warnings,
+        },
     )
+    return result
 
 
 def _corr_per_channel(y: np.ndarray, y_hat: np.ndarray) -> np.ndarray:
