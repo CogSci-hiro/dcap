@@ -66,6 +66,30 @@ def run(args: argparse.Namespace) -> None:
         ))
     analysis_cfg = ClinicalAnalysisConfig(analysis_view=args.analysis_view)
 
+    trf_cfg = None
+    if args.trf:
+        trf_cfg = TRFConfig(
+            backend=str(args.trf_backend).lower(),
+            alpha=float(args.trf_alpha),
+            tmin_s=float(args.trf_tmin_s),
+            tmax_s=float(args.trf_tmax_s),
+        )
+
+    gamma_requested = args.gamma_envelope
+    trf_requested = args.trf
+
+    # Pipeline dependency resolution
+    if trf_requested:
+        envelope_reason = "trf"
+    elif gamma_requested:
+        envelope_reason = "explicit"
+    else:
+        envelope_reason = None
+
+    envelope_cfg = None
+    if envelope_reason is not None:
+        envelope_cfg = GammaEnvelopeConfig()
+
     report_path = run_clinical_report_from_bids(
         bids_root=args.bids_root,
         out_dir=args.out_dir,
@@ -75,6 +99,8 @@ def run(args: argparse.Namespace) -> None:
         run_id=args.run,
         preproc_cfg=preproc_cfg,
         analysis_cfg=analysis_cfg,
+        trf_cfg=trf_cfg,
+        envelope_cfg=envelope_cfg
     )
 
     print(report_path)
