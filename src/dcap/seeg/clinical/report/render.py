@@ -106,39 +106,84 @@ def render_report_v0(bundle: ClinicalAnalysisBundle, out_dir: Path) -> Path:
 
 
 def _render_trf_section(bundle: ClinicalAnalysisBundle) -> str:
-    if bundle.trf_result is None:
+    """
+    Render the TRF analysis section for the clinical report.
+
+    This function assumes `bundle.trf_result` is a `TRFResult` instance
+    and relies only on its public fields plus optional entries in `extra`.
+    """
+    trf = bundle.trf_result
+    if trf is None:
         return ""
 
-    trf = bundle.trf_result
-    lines = []
+    lines: list[str] = []
+
+    # -------------------------------------------------------------------------
+    # Header
+    # -------------------------------------------------------------------------
     lines.append("## TRF analysis")
     lines.append("")
-    lines.append(f"- Backend: {trf.backend}")
-    lines.append(f"- Analysis view: {bundle.preprocessing_context.decisions.get('analysis_view_used', 'unknown')}")
-    lines.append(f"- Lags: {trf.config.get('tmin_ms')} … {trf.config.get('tmax_ms')} ms (step {trf.config.get('step_ms')} ms)")
-    lines.append(f"- Alpha: {trf.config.get('alpha')}")
+
+    analysis_view = bundle.preprocessing_context.decisions.get(
+        "analysis_view_used", "unknown"
+    )
+    lines.append(f"- Analysis view: {analysis_view}")
+
+    # -------------------------------------------------------------------------
+    # Model / lag information
+    # -------------------------------------------------------------------------
+    lines.append(f"- Model: {trf.model_name}")
+
+    # Lag window (if available)
+    lag_cfg = trf.extra.get("lag_config", {})
+    tmin_ms = lag_cfg.get("tmin_ms")
+    tmax_ms = lag_cfg.get("tmax_ms")
+
+    if tmin_ms is not None and tmax_ms is not None:
+        lines.append(f"- Lags: {tmin_ms} … {tmax_ms} ms")
+
+    # Backend / regularization info (optional)
+    alpha = trf.extra.get("alpha")
+    if alpha is not None:
+        lines.append(f"- Regularization (alpha): {alpha}")
+
     lines.append("")
 
-    # Score table (if path exists)
-    score_table = getattr(trf, "score_table_path", None)
-    if score_table:
-        lines.append("### Channel scores")
-        lines.append(f"(Saved table: {score_table})")
+    # -------------------------------------------------------------------------
+    # Metrics / scores
+    # -------------------------------------------------------------------------
+    if trf.metrics:
+        lines.append("### Summary metrics")
+        for name, value in trf.metrics.items():
+            lines.append(f"- {name}: {value:.4g}")
         lines.append("")
 
-    # Figures (embedded)
-    figs = getattr(trf, "figures", {}) or {}
-    if "scores" in figs:
+    # Optional score table reference
+    score_table_path = trf.extra.get("score_table_path")
+    if score_table_path:
+        lines.append("### Channel-wise scores")
+        lines.append(f"(Saved table: {score_table_path})")
+        lines.append("")
+
+    # -------------------------------------------------------------------------
+    # Figures (if provided)
+    # -------------------------------------------------------------------------
+    figures = trf.extra.get("figures", {}) or {}
+
+    if "scores" in figures:
         lines.append("### Scores across channels")
-        lines.append(_embed_png(figs["scores"]))
-        lines.append("")
-    if "kernel" in figs:
-        lines.append("### Kernel summary")
-        lines.append(_embed_png(figs["kernel"]))
+        lines.append(_embed_png(figures["scores"]))
         lines.append("")
 
-    # Warnings
-    warnings = getattr(trf, "warnings", None) or []
+    if "kernel" in figures:
+        lines.append("### Kernel summary")
+        lines.append(_embed_png(figures["kernel"]))
+        lines.append("")
+
+    # -------------------------------------------------------------------------
+    # Warnings / notes
+    # -------------------------------------------------------------------------
+    warnings = trf.extra.get("warnings", []) or []
     if warnings:
         lines.append("### TRF notes / warnings")
         for w in warnings:
