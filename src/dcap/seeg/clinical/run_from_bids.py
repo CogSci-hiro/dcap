@@ -71,6 +71,7 @@ def run_clinical_report_from_bids(
         events_df=events_df,
         ctx=None,
         trf_runner=trf_runner,
+        out_dir=out_dir
     )
 
     report_path = render_report_v0(bundle=bundle, out_dir=out_dir)

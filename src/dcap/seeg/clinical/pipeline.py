@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 import mne
@@ -14,7 +15,8 @@ from dcap.seeg.preprocessing.configs import (
 from dcap.seeg.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.seeg.preprocessing.types import PreprocContext
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
-from dcap.seeg.clinical.qc import compute_clinical_qc
+from dcap.seeg.clinical.viz.qc_figures import make_qc_figures
+from dcap.seeg.clinical.qc import compute_clinical_qc, ClinicalQcSummary
 
 
 def run_clinical_analysis(
@@ -33,11 +35,10 @@ def run_clinical_analysis(
     notes: Optional[Mapping[str, str]] = None,
     ctx: Optional[PreprocContext] = None,
     trf_runner: Optional[Any] = None,
+    out_dir: Path | None = None,
 ) -> ClinicalAnalysisBundle:
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("run_clinical_analysis expects an mne.io.BaseRaw.")
-
-    analysis_cfg_final = analysis_cfg if analysis_cfg is not None else ClinicalAnalysisConfig()
 
     preproc_result = run_clinical_preproc(
         raw=raw,
@@ -47,20 +48,23 @@ def run_clinical_analysis(
         ctx=ctx,
     )
 
+    analysis_cfg_final = analysis_cfg if analysis_cfg is not None else ClinicalAnalysisConfig()
+
+    view_used, raw_analysis = choose_analysis_view(
+        raw_views=preproc_result.views,
+        requested=analysis_cfg_final.analysis_view,
+    )
+
     artifacts = list(preproc_result.artifacts)
     envelopes = None
 
     if envelope_cfg is not None:
-        view_used, envelope_source_raw = choose_analysis_view(
-            raw_views=preproc_result.views,
-            requested=analysis_cfg_final.analysis_view,
-        )
-
         env_raw, env_artifact = compute_gamma_envelope(
-            raw=envelope_source_raw,
+            raw=raw_analysis,
             cfg=envelope_cfg,
             ctx=preproc_result.ctx,
         )
+
         artifacts.append(env_artifact)
         envelopes = {"gamma": env_raw}
 
@@ -78,7 +82,26 @@ def run_clinical_analysis(
         trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
         trf_result = trf_runner(trf_input, trf_cfg)
 
-    qc = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
+    qc_base = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
+
+    fig_paths: dict[str, str] = {}
+    if out_dir is not None:
+        fig_paths = make_qc_figures(
+            out_dir=out_dir,
+            raw_original=preproc_result.views["original"],
+            raw_analysis=raw_analysis,
+            analysis_view_name=view_used,
+            subject_id=subject_id,
+            session_id=session_id,
+            run_id=run_id,
+        )
+
+    qc = ClinicalQcSummary(
+        recording=qc_base.recording,
+        views=qc_base.views,
+        channel_qc=qc_base.channel_qc,
+        fig_paths=fig_paths,
+    )
 
     bundle_notes = ClinicalAnalysisNotes(items=dict(notes) if notes is not None else {})
 
@@ -91,5 +114,6 @@ def run_clinical_analysis(
         preprocessing_context=preproc_result.ctx,
         envelopes=envelopes,
         trf_result=trf_result,
+        qc=qc,
         notes=bundle_notes,
     )

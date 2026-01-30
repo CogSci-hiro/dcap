@@ -7,7 +7,7 @@
 # =============================================================================
 # =============================================================================
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
 import numpy as np
@@ -45,6 +45,7 @@ class ClinicalQcSummary:
     recording: Mapping[str, float]
     views: pd.DataFrame
     channel_qc: Optional[pd.DataFrame] = None
+    fig_paths: Mapping[str, str] = field(default_factory=dict)
 
 
 def compute_clinical_qc(
