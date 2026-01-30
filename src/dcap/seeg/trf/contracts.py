@@ -42,8 +42,9 @@ class TRFConfig:
 
     backend: str = "mne-rf"
     model_name: str = "ridge"
-    tmin_s: float = -0.2
-    tmax_s: float = 0.8
+    tmin_ms: float = -200.0
+    tmax_ms: float = 800.0
+    step_ms: float = 1.0
     alpha: float = 1.0
 
 
