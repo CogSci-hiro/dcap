@@ -4,6 +4,7 @@ from typing import Any, Mapping, Optional, Sequence
 import mne
 
 from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
+from dcap.seeg.clinical.qc import ClinicalQcSummary
 
 @dataclass(frozen=True)
 class ClinicalAnalysisNotes:
@@ -20,3 +21,4 @@ class ClinicalAnalysisBundle:
     envelopes: Optional[Mapping[str, mne.io.BaseRaw]] = None
     trf_result: Optional[Any] = None
     notes: ClinicalAnalysisNotes = field(default_factory=ClinicalAnalysisNotes)
+    qc: Optional[ClinicalQcSummary] = None

@@ -21,6 +21,19 @@ def _warnings_table(bundle: ClinicalAnalysisBundle) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["step", "warning"])
 
 
+def _df_to_md(df: pd.DataFrame) -> str:
+    if df is None or df.empty:
+        return "_(none)_"
+    return df.to_markdown(index=False)
+
+
+def _recording_kv_to_md(rec: dict) -> str:
+    lines = []
+    for k, v in rec.items():
+        lines.append(f"- **{k}**: {v}")
+    return "\n".join(lines) if lines else "_(none)_"
+
+
 def render_report_v0(bundle: ClinicalAnalysisBundle, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -53,6 +66,27 @@ def render_report_v0(bundle: ClinicalAnalysisBundle, out_dir: Path) -> Path:
     md.append(f"- **Raw views**: {', '.join(view_names)}")
     md.append(f"- **Envelopes**: {', '.join(envelope_names) if envelope_names else '(none)'}")
     md.append(f"- **TRF**: {'computed' if bundle.trf_result is not None else 'not computed'}")
+    md.append("## QC summary")
+
+    if bundle.qc is None:
+        md.append("_(QC not computed)_")
+    else:
+        md.append("### Recording")
+        md.append(_recording_kv_to_md(dict(bundle.qc.recording)))
+        md.append("")
+        md.append("### Views")
+        md.append(_df_to_md(bundle.qc.views))
+        md.append("")
+        md.append("### Channel QC (original)")
+        if bundle.qc.channel_qc is None:
+            md.append("_(not computed)_")
+        else:
+            flagged = bundle.qc.channel_qc.loc[
+                (bundle.qc.channel_qc["is_flat"]) | (bundle.qc.channel_qc["is_outlier"]),
+                ["channel", "variance", "log10_variance", "is_flat", "is_outlier"],
+            ].copy()
+            md.append(_df_to_md(flagged))
+        md.append("")
     md.append("")
     md.append("## Analysis view policy")
     md.append(f"- **Requested**: {view_requested}")

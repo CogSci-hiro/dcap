@@ -14,6 +14,7 @@ from dcap.seeg.preprocessing.configs import (
 from dcap.seeg.preprocessing.pipelines.clinical import run_clinical_preproc
 from dcap.seeg.preprocessing.types import PreprocContext
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
+from dcap.seeg.clinical.qc import compute_clinical_qc
 
 
 def run_clinical_analysis(
@@ -76,6 +77,8 @@ def run_clinical_analysis(
             raise NotImplementedError("TRF requested but no trf_runner was provided.")
         trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
         trf_result = trf_runner(trf_input, trf_cfg)
+
+    qc = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
 
     bundle_notes = ClinicalAnalysisNotes(items=dict(notes) if notes is not None else {})
 
