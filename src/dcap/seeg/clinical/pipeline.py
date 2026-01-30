@@ -53,13 +53,56 @@ def run_clinical_analysis(
     trf_runner: Optional[Any] = None,
     out_dir: Path | None = None,
 ) -> ClinicalAnalysisBundle:
+    """
+    Run a clinical analysis composition pipeline and return a report-ready bundle.
+
+    Parameters
+    ----------
+    raw
+        Loaded Raw object (from BIDS IO layer).
+    subject_id, session_id, run_id
+        Identifiers used in reporting.
+    preproc_cfg
+        Clinical preprocessing configuration.
+    electrodes_table, coords_cfg
+        Optional coordinate attachment inputs.
+    envelope_cfg
+        Optional gamma envelope configuration. If provided, a "gamma" envelope Raw is produced.
+    trf_cfg
+        Optional TRF configuration. If provided, TRF computation is attempted using `trf_runner`.
+    events_df
+        Optional events table needed for TRF. Required if trf_cfg is provided.
+    notes
+        Optional key-value notes for reporting.
+    ctx
+        Optional existing PreprocContext.
+    trf_runner
+        Optional callable: (TRFInput, TRFConfig) -> TRFResult. If None and trf_cfg is provided,
+        a NotImplementedError is raised.
+
+    Returns
+    -------
+    bundle
+        ClinicalAnalysisBundle consumed by reporting.
+
+    Usage example
+    -------------
+        bundle = run_clinical_analysis(
+            raw=raw,
+            subject_id="sub-001",
+            session_id="ses-01",
+            run_id="run-1",
+            preproc_cfg=ClinicalPreprocConfig(),
+            envelope_cfg=GammaEnvelopeConfig(),
+        )
+    """
     if not isinstance(raw, mne.io.BaseRaw):
         raise TypeError("run_clinical_analysis expects an mne.io.BaseRaw.")
 
     preproc_result = run_clinical_preproc(
         raw=raw,
-        cfg=preproc_cfg,
         electrodes_table=electrodes_table,
+        cfg=preproc_cfg,
         coords_cfg=coords_cfg,
         ctx=ctx,
     )
