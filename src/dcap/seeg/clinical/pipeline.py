@@ -50,8 +50,8 @@ def run_clinical_analysis(
 
     analysis_cfg_final = analysis_cfg if analysis_cfg is not None else ClinicalAnalysisConfig()
 
-    view_used, raw_analysis = choose_analysis_view(
-        raw_views=preproc_result.views,
+    view_used, raw_analysis, warnings = choose_analysis_view(
+        views=preproc_result.views,
         requested=analysis_cfg_final.analysis_view,
     )
 

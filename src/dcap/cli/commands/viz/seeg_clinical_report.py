@@ -7,7 +7,7 @@ from typing import Any
 from dcap.seeg.clinical.run_from_bids import run_clinical_report_from_bids
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig
 from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
-from dcap.seeg.preprocessing.configs import LineNoiseConfig
+from dcap.seeg.preprocessing.configs import LineNoiseConfig, RereferenceConfig
 
 
 def add_subparser(subparsers: Any) -> None:
@@ -45,13 +45,16 @@ def add_subparser(subparsers: Any) -> None:
 
 
 def run(args: argparse.Namespace) -> None:
+    reref_cfg = RereferenceConfig(
+        methods=(args.analysis_view,),
+    )
 
     preproc_cfg = ClinicalPreprocConfig(
+        rereference=reref_cfg,
         line_noise=LineNoiseConfig(
-            method=str(args.line_noise_method),
+            method=str(args.line_noise_method).lower(),
             freq_base=float(args.line_noise_freq),
-        )
-    )
+        ))
     analysis_cfg = ClinicalAnalysisConfig(analysis_view=args.analysis_view)
 
     report_path = run_clinical_report_from_bids(

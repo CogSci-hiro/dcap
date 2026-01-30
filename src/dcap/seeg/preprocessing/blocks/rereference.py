@@ -217,7 +217,6 @@ def rereference(
     warnings: List[str] = []
 
     data = raw.get_data()
-    picks = np.arange(len(raw.ch_names), dtype=int)
 
     picks = mne.pick_types(
         raw.info,
