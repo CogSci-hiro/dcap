@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from dcap.seeg.clinical.run_from_bids import run_clinical_report_from_bids
-from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig
+from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig, GammaEnvelopeConfig
 from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
 from dcap.seeg.preprocessing.configs import LineNoiseConfig, RereferenceConfig
+from dcap.seeg.trf.contracts import TRFConfig
 
 
 def add_subparser(subparsers: Any) -> None:
