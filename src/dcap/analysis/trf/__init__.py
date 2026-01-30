@@ -1,43 +1,37 @@
-"""dcap.analysis.trf
+# =============================================================================
+#                           TRF analysis subpackage
+# =============================================================================
 
-Minimal Temporal Response Function (TRF) analysis utilities.
-
-This subpackage is designed to be:
-- testable (pure functions, typed containers)
-- headless (no plotting/report generation)
-- reusable across tasks/datasets
-
-The current state is a *skeleton*: function bodies raise NotImplementedError
-until DSP/modeling logic is filled in.
-
-Public API
-----------
-- :func:`dcap.analysis.trf.compute_speech_envelope`
-- :func:`dcap.analysis.trf.build_lagged_design_matrix`
-- :func:`dcap.analysis.trf.fit_trf_ridge`
-- :func:`dcap.analysis.trf.predict_trf`
-- :func:`dcap.analysis.trf.save_trf_result`
-- :func:`dcap.analysis.trf.load_trf_result`
-
-"""
-
-from dcap.analysis.trf.design_matrix import build_lagged_design_matrix
-from dcap.analysis.trf.envelope import compute_speech_envelope
-from dcap.analysis.trf.fit import predict_trf
-from dcap.analysis.trf.io import load_trf_result, save_trf_result
-from dcap.analysis.trf.metrics import pearson_corr_by_output, r2_by_output
-from dcap.analysis.trf.types import EnvelopeConfig, LagConfig, TrfFitConfig, TrfResult
+from dcap.analysis.trf.alignment import align_by_event_sample, event_time_to_sample
+from dcap.analysis.trf.design_matrix import LagConfig, build_lagged_design_matrix, make_lag_samples
+from dcap.analysis.trf.envelope import EnvelopeConfig, compute_speech_envelope
+from dcap.analysis.trf.prep import (
+    ZScoreConfig,
+    crop_by_samples,
+    resample_poly_1d,
+    resample_poly_time_last,
+    stack_time_epoch_feature,
+    zscore,
+)
+from dcap.analysis.trf.fit import TrfFitConfig, TrfFitResult, fit_trf, fit_trf_ridge, predict_trf
 
 __all__ = [
     "EnvelopeConfig",
-    "LagConfig",
-    "TrfFitConfig",
-    "TrfResult",
-    "build_lagged_design_matrix",
     "compute_speech_envelope",
-    "load_trf_result",
-    "pearson_corr_by_output",
+    "LagConfig",
+    "make_lag_samples",
+    "build_lagged_design_matrix",
+    "ZScoreConfig",
+    "zscore",
+    "resample_poly_1d",
+    "resample_poly_time_last",
+    "crop_by_samples",
+    "stack_time_epoch_feature",
+    "event_time_to_sample",
+    "align_by_event_sample",
+    "fit_trf",
+    "fit_trf_ridge",
     "predict_trf",
-    "r2_by_output",
-    "save_trf_result",
+    "TrfFitConfig",
+    "TrfFitResult",
 ]

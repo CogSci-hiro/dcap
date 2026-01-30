@@ -7,9 +7,7 @@ from typing import Callable, Dict, Mapping
 from dcap.analysis.trf.backends.base import TrfBackend
 from dcap.analysis.trf.backends.mne_rf import MneReceptiveFieldBackend
 
-
 BackendFactory = Callable[[], TrfBackend]
-
 
 _BACKENDS: Dict[str, BackendFactory] = {
     "mne-rf": lambda: MneReceptiveFieldBackend(),
@@ -19,6 +17,10 @@ _BACKENDS: Dict[str, BackendFactory] = {
 def get_backend(name: str) -> TrfBackend:
     """
     Construct a TRF backend by name.
+
+    Usage example
+    -------------
+        backend = get_backend("mne-rf")
     """
     try:
         return _BACKENDS[name]()
@@ -28,7 +30,5 @@ def get_backend(name: str) -> TrfBackend:
 
 
 def list_backends() -> Mapping[str, BackendFactory]:
-    """
-    Return the backend registry (read-only use).
-    """
+    """Return a copy of the backend registry."""
     return dict(_BACKENDS)

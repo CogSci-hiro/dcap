@@ -1,8 +1,6 @@
 # =============================================================================
-#                  TRF backends: base interface (stable)
+#                   TRF backends: base interface (stable)
 # =============================================================================
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
@@ -17,12 +15,16 @@ class BackendFitResult:
 
     Attributes
     ----------
-    coef_ : ndarray, shape (n_outputs, n_features)
-        Model coefficients in the backend's feature space.
-    intercept_ : ndarray, shape (n_outputs,)
-        Intercept term.
-    extra : Mapping[str, Any]
-        Backend-specific extras (e.g., estimator object, CV details).
+    coef_ : ndarray
+        Backend coefficient array.
+    intercept_ : ndarray
+        Backend intercept array.
+    extra : mapping
+        Backend-specific state required for prediction (e.g., fitted estimator).
+
+    Usage example
+    -------------
+        result = BackendFitResult(coef_=coef, intercept_=intercept, extra={"estimator": obj})
     """
 
     coef_: np.ndarray
@@ -31,14 +33,7 @@ class BackendFitResult:
 
 
 class TrfBackend(Protocol):
-    """
-    Protocol for TRF backends.
-
-    A backend is responsible for:
-    - fitting weights given X, Y
-    - predicting given X
-    - exposing coefficients consistently
-    """
+    """Protocol for TRF backends."""
 
     name: str
 
@@ -53,9 +48,5 @@ class TrfBackend(Protocol):
     ) -> BackendFitResult:
         ...
 
-    def predict(
-        self,
-        X: np.ndarray,
-        fit_result: BackendFitResult,
-    ) -> np.ndarray:
+    def predict(self, X: np.ndarray, fit_result: BackendFitResult) -> np.ndarray:
         ...
