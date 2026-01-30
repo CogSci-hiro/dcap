@@ -99,13 +99,14 @@ def render_report_v0(bundle: ClinicalAnalysisBundle, out_dir: Path) -> Path:
     md.append(df_to_md(warn_df))
     md.append("")
 
-    md.append(_render_trf_section(bundle))
+    md.extend(_render_trf_section(bundle))
 
     report_path.write_text("\n".join(md), encoding="utf-8")
+
     return report_path
 
 
-def _render_trf_section(bundle: ClinicalAnalysisBundle) -> str:
+def _render_trf_section(bundle: ClinicalAnalysisBundle) -> List[str]:
     """
     Render the TRF analysis section for the clinical report.
 
@@ -190,8 +191,7 @@ def _render_trf_section(bundle: ClinicalAnalysisBundle) -> str:
             lines.append(f"- {w}")
         lines.append("")
 
-    return "\n".join(lines)
-
+    return lines
 
 
 def _embed_png(path: str | Path, *, alt: str = "") -> str:
