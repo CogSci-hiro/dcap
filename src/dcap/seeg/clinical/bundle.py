@@ -1,3 +1,20 @@
+# =============================================================================
+# =============================================================================
+#                         ###############################
+#                         #   CLINICAL ANALYSIS BUNDLE  #
+#                         ###############################
+# =============================================================================
+# =============================================================================
+#
+# A single immutable container that the clinical report consumes.
+#
+# Design rules
+# - Logic only: no file I/O, no CLI, no printing.
+# - Reporting consumes ONLY this bundle (plus static templates).
+# - Bundle must remain valid even when optional analyses (e.g., TRF) are missing.
+#
+# =============================================================================
+
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
