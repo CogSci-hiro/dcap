@@ -44,6 +44,14 @@ def add_subparser(subparsers: Any) -> None:
         help="Base line frequency (50 or 60 Hz)",
     )
 
+    parser.add_argument("--trf", action="store_true", help="Enable TRF computation.")
+    parser.add_argument("--trf-backend", type=str, default="mne-rf")
+    parser.add_argument("--trf-alpha", type=float, default=1.0)
+    parser.add_argument("--trf-tmin-s", type=float, default=-0.1)
+    parser.add_argument("--trf-tmax-s", type=float, default=0.4)
+
+    parser.add_argument("--gamma-envelope", action="store_true", help="Enable gamma envelope computation.")
+
 
 def run(args: argparse.Namespace) -> None:
     reref_cfg = RereferenceConfig(
