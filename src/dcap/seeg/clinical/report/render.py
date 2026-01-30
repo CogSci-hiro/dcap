@@ -99,5 +99,72 @@ def render_report_v0(bundle: ClinicalAnalysisBundle, out_dir: Path) -> Path:
     md.append(df_to_md(warn_df))
     md.append("")
 
+    md.append(_render_trf_section(bundle))
+
     report_path.write_text("\n".join(md), encoding="utf-8")
     return report_path
+
+
+def _render_trf_section(bundle: ClinicalAnalysisBundle) -> str:
+    if bundle.trf_result is None:
+        return ""
+
+    trf = bundle.trf_result
+    lines = []
+    lines.append("## TRF analysis")
+    lines.append("")
+    lines.append(f"- Backend: {trf.backend}")
+    lines.append(f"- Analysis view: {bundle.preprocessing_context.decisions.get('analysis_view_used', 'unknown')}")
+    lines.append(f"- Lags: {trf.config.get('tmin_ms')} … {trf.config.get('tmax_ms')} ms (step {trf.config.get('step_ms')} ms)")
+    lines.append(f"- Alpha: {trf.config.get('alpha')}")
+    lines.append("")
+
+    # Score table (if path exists)
+    score_table = getattr(trf, "score_table_path", None)
+    if score_table:
+        lines.append("### Channel scores")
+        lines.append(f"(Saved table: {score_table})")
+        lines.append("")
+
+    # Figures (embedded)
+    figs = getattr(trf, "figures", {}) or {}
+    if "scores" in figs:
+        lines.append("### Scores across channels")
+        lines.append(_embed_png(figs["scores"]))
+        lines.append("")
+    if "kernel" in figs:
+        lines.append("### Kernel summary")
+        lines.append(_embed_png(figs["kernel"]))
+        lines.append("")
+
+    # Warnings
+    warnings = getattr(trf, "warnings", None) or []
+    if warnings:
+        lines.append("### TRF notes / warnings")
+        for w in warnings:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+
+def _embed_png(path: str | Path, *, alt: str = "") -> str:
+    """
+    Embed a PNG image in the clinical report.
+
+    Parameters
+    ----------
+    path
+        Path to the PNG file.
+    alt
+        Optional alt text.
+
+    Returns
+    -------
+    markdown
+        Markdown image embedding string.
+    """
+    p = Path(path)
+    return f"![{alt}]({p.as_posix()})"
+

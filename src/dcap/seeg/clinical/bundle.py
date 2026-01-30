@@ -16,12 +16,30 @@
 # =============================================================================
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import mne
+import numpy as np
 
 from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 from dcap.seeg.clinical.qc import ClinicalQcSummary
+
+
+@dataclass(frozen=True, slots=True)
+class ClinicalTrfResult:
+    backend: str
+    analysis_view_name: str
+    sfreq: float
+    epoch_ids: List[str]
+
+    # Backend-agnostic model params (from BackendFitResult)
+    coef: np.ndarray          # expected shape: (n_lags, n_features, n_outputs) or backend-defined
+    intercept: np.ndarray     # expected shape: (n_outputs,)
+
+    # Optional summaries for report
+    score_table_path: Optional[str]   # TSV/CSV path
+    figures: Dict[str, str]           # e.g. {"kernels": "...png", "scores": "...png"}
+    warnings: List[str]
 
 @dataclass(frozen=True)
 class ClinicalAnalysisNotes:
@@ -95,3 +113,6 @@ class ClinicalAnalysisBundle:
 
     notes: ClinicalAnalysisNotes = field(default_factory=ClinicalAnalysisNotes)
     qc: Optional[ClinicalQcSummary] = None
+
+    trf: Optional[ClinicalTrfResult] = None
+

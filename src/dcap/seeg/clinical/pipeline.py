@@ -15,6 +15,7 @@
 #
 # =============================================================================
 
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 import mne
@@ -33,6 +34,7 @@ from dcap.seeg.preprocessing.types import PreprocContext
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 from dcap.seeg.clinical.viz.qc_figures import make_qc_figures
 from dcap.seeg.clinical.qc import compute_clinical_qc, ClinicalQcSummary
+from dcap.seeg.clinical.trf.runner_analysis_trf import run_trf_with_analysis_trf
 
 
 def run_clinical_analysis(
@@ -136,10 +138,10 @@ def run_clinical_analysis(
             raise ValueError("events_df must be provided when trf_cfg is provided.")
         if envelopes is None or "gamma" not in envelopes:
             raise ValueError("Gamma envelope must be computed when trf_cfg is provided.")
-        if trf_runner is None:
-            raise NotImplementedError("TRF requested but no trf_runner was provided.")
+
+        runner = trf_runner if trf_runner is not None else run_trf_with_analysis_trf
         trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
-        trf_result = trf_runner(trf_input, trf_cfg)
+        trf_result = runner(trf_input, trf_cfg)
 
     qc_base = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
 
