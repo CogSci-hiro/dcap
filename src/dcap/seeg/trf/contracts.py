@@ -28,9 +28,9 @@ class TRFConfig:
     ----------
     model_name
         Human-readable model label (e.g., "mTRF", "ridge").
-    tmin_sec
+    tmin_s
         Minimum lag in seconds.
-    tmax_sec
+    tmax_s
         Maximum lag in seconds.
     alpha
         Regularization strength (if applicable).
@@ -40,9 +40,10 @@ class TRFConfig:
         cfg = TRFConfig(model_name="ridge", tmin_sec=-0.2, tmax_sec=0.8, alpha=1.0)
     """
 
+    backend: str = "mne-rf"
     model_name: str = "ridge"
-    tmin_sec: float = -0.2
-    tmax_sec: float = 0.8
+    tmin_s: float = -0.2
+    tmax_s: float = 0.8
     alpha: float = 1.0
 
 
