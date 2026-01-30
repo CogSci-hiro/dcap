@@ -8,7 +8,7 @@
 
 import numpy as np
 
-
+# review
 def event_time_to_sample(onset_s: float, sfreq: float, first_samp: int = 0) -> int:
     """
     Convert an onset time in seconds to a sample index.
