@@ -7,6 +7,8 @@ class LineNoiseConfig:
     freq_base: float = 50.0
     max_harmonic_hz: float = 250.0
     picks: Optional[Sequence[str]] = None
+    chunk_sec: float = 60.0
+    nremove: int = 1
 
     def __post_init__(self) -> None:
         if self.freq_base <= 0:

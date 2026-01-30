@@ -7,6 +7,7 @@ from typing import Any
 from dcap.seeg.clinical.run_from_bids import run_clinical_report_from_bids
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig
 from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
+from dcap.seeg.preprocessing.configs import LineNoiseConfig
 
 
 def add_subparser(subparsers: Any) -> None:
@@ -28,9 +29,29 @@ def add_subparser(subparsers: Any) -> None:
         choices=["original", "car", "bipolar", "laplacian", "wm_ref"],
     )
 
+    parser.add_argument(
+        "--line-noise-method",
+        choices=["notch", "zapline"],
+        default="notch",
+        help="Line-noise removal method",
+    )
+
+    parser.add_argument(
+        "--line-noise-freq",
+        type=float,
+        default=50.0,
+        help="Base line frequency (50 or 60 Hz)",
+    )
+
 
 def run(args: argparse.Namespace) -> None:
-    preproc_cfg = ClinicalPreprocConfig()
+
+    preproc_cfg = ClinicalPreprocConfig(
+        line_noise=LineNoiseConfig(
+            method=str(args.line_noise_method),
+            freq_base=float(args.line_noise_freq),
+        )
+    )
     analysis_cfg = ClinicalAnalysisConfig(analysis_view=args.analysis_view)
 
     report_path = run_clinical_report_from_bids(

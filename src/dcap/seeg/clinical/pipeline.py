@@ -103,6 +103,8 @@ def run_clinical_analysis(
         fig_paths=fig_paths,
     )
 
+    qc = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
+
     bundle_notes = ClinicalAnalysisNotes(items=dict(notes) if notes is not None else {})
 
     return ClinicalAnalysisBundle(
