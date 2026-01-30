@@ -72,8 +72,9 @@ def run(args: argparse.Namespace) -> None:
         trf_cfg = TRFConfig(
             backend=str(args.trf_backend).lower(),
             alpha=float(args.trf_alpha),
-            tmin_s=float(args.trf_tmin_s),
-            tmax_s=float(args.trf_tmax_s),
+            tmin_ms=float(args.trf_tmin_ms),
+            tmax_ms=float(args.trf_tmax_ms),
+            step_ms=float(args.trf_step_ms)
         )
 
     gamma_requested = args.gamma_envelope
