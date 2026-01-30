@@ -8,13 +8,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import mne
+from scipy.stats import zscore
 
 from dcap.analysis.trf.fit import fit_trf_ridge, predict_trf, LagConfig
-from dcap.analysis.trf.prep import zscore
 from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 
 
