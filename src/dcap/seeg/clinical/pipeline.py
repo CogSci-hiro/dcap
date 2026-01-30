@@ -144,11 +144,8 @@ def run_clinical_analysis(
         trf_input = TRFInput(signal_raw=envelopes["gamma"], events_df=events_df)
         trf_result = runner(trf_input, trf_cfg)
 
-    qc_base = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
-
-    fig_paths: dict[str, str] = {}
     if out_dir is not None:
-        fig_paths = make_qc_figures(
+        make_qc_figures(
             out_dir=out_dir,
             raw_original=preproc_result.views["original"],
             raw_analysis=raw_analysis,
@@ -157,13 +154,6 @@ def run_clinical_analysis(
             session_id=session_id,
             run_id=run_id,
         )
-
-    qc = ClinicalQcSummary(
-        recording=qc_base.recording,
-        views=qc_base.views,
-        channel_qc=qc_base.channel_qc,
-        fig_paths=fig_paths,
-    )
 
     qc = compute_clinical_qc(raw_views=preproc_result.views, include_channel_table=True)
 
