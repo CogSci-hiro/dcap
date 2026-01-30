@@ -3,14 +3,12 @@
 # =============================================================================
 #
 # Array utilities used by TRF task adapters and backends:
-# - z-scoring
 # - polyphase resampling
 # - cropping
 # - stacking runs into (n_times, n_epochs, n_features) layout used by MNE
 #
 # =============================================================================
 
-from dataclasses import dataclass
 from fractions import Fraction
 from typing import Sequence, Tuple
 
