@@ -219,6 +219,23 @@ def rereference(
     data = raw.get_data()
     picks = np.arange(len(raw.ch_names), dtype=int)
 
+    picks = mne.pick_types(
+        raw.info,
+        seeg=True,
+        ecog=True,
+        eeg=False,
+        meg=False,
+        stim=False,
+        misc=False,
+        eog=False,
+        ecg=False,
+    )
+
+    # Optional but recommended: exclude bad channels from the reference pool
+    bad_set = set(raw.info.get("bads", []))
+    if bad_set:
+        picks = np.array([p for p in picks if raw.ch_names[int(p)] not in bad_set], dtype=int)
+
     shafts, shafts_inferred = _get_shafts(ctx.geometry, raw)
     if shafts_inferred:
         if shafts:

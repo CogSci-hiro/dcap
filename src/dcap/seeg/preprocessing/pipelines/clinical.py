@@ -102,5 +102,6 @@ def run_clinical_preproc(
             if name == "original":
                 continue
             views[name] = v
+        reref_views["car"].save("test_raw.fif", overwrite=True)
 
     return PreprocResult(views=views, artifacts=artifacts, ctx=ctx_final)
