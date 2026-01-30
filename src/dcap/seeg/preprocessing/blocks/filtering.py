@@ -107,6 +107,13 @@ def compute_gamma_envelope(
         sfreq=sfreq,
         ch_types=["misc"] * len(channel_names),
     )
+
+    ch_types = raw.get_channel_types()
+    info = mne.create_info(
+        ch_names=raw.ch_names,
+        sfreq=float(raw.info["sfreq"]),
+        ch_types=ch_types,
+    )
     env_raw = mne.io.RawArray(envelope_data, info, verbose=False)
     env_raw.set_annotations(raw.annotations.copy())
 
