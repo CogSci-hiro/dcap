@@ -182,17 +182,8 @@ def _save_timeseries_comparison(
     raw_b: mne.io.BaseRaw,
     label_b: str,
 ) -> None:
-    """
-    Save a stacked time-series plot for a subset of channels.
-
-    Visual encoding (clinician-friendly)
-    -----------------------------------
-    - Original: light gray (all channels), thin
-    - Analysis view: colored (per channel), thicker
-    This avoids the "solid vs dashed but different colors" confusion.
-    """
-    picks_a = _pick_seeg_like_channels(raw_a)
-    if picks_a.size == 0:
+    picks_a_all = _pick_seeg_like_channels(raw_a)
+    if picks_a_all.size == 0:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.text(0.5, 0.5, "No sEEG/ECoG channels available for time-series QC.", ha="center", va="center")
@@ -200,8 +191,9 @@ def _save_timeseries_comparison(
         plt.close(fig)
         return
 
-    ch_names = [raw_a.ch_names[int(i)] for i in picks_a]
-    common = [ch for ch in ch_names if ch in set(raw_b.ch_names)]
+    ch_names_a = [raw_a.ch_names[int(i)] for i in picks_a_all]
+    ch_set_b = set(raw_b.ch_names)
+    common = [ch for ch in ch_names_a if ch in ch_set_b]
     if len(common) == 0:
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -212,23 +204,34 @@ def _save_timeseries_comparison(
 
     chosen = _choose_channels_for_display(raw_a, common, n=_TIMESERIES_N_CHANNELS)
 
-    duration = min(_TIMESERIES_DURATION_SEC, raw_a.times[-1] if raw_a.n_times > 1 else 0.0)
+    duration = min(_TIMESERIES_DURATION_SEC, float(raw_a.times[-1]) if raw_a.n_times > 1 else 0.0)
     tmin, tmax = 0.0, float(duration)
 
-    raw_a_seg = raw_a.copy().pick(chosen).crop(tmin=tmin, tmax=tmax)
-    raw_b_seg = raw_b.copy().pick(chosen).crop(tmin=tmin, tmax=tmax)
+    # -------------------------------------------------------------------------
+    # Robust extraction: index-based mapping + sample-range slicing
+    # -------------------------------------------------------------------------
+    sfreq_a = float(raw_a.info["sfreq"])
+    sfreq_b = float(raw_b.info["sfreq"])
 
-    raw_a_seg = _maybe_downsample_for_plot(raw_a_seg)
-    raw_b_seg = _maybe_downsample_for_plot(raw_b_seg)
+    start_a, stop_a = _time_range_to_samples(raw_a, tmin=tmin, tmax=tmax)
+    start_b, stop_b = _time_range_to_samples(raw_b, tmin=tmin, tmax=tmax)
 
-    data_a = _zscore_rows(raw_a_seg.get_data())
-    data_b = _zscore_rows(raw_b_seg.get_data())
-    times = raw_a_seg.times
+    picks_a = np.array([raw_a.ch_names.index(ch) for ch in chosen], dtype=int)
+    picks_b = np.array([raw_b.ch_names.index(ch) for ch in chosen], dtype=int)
+
+    data_a = raw_a.get_data(picks=picks_a, start=start_a, stop=stop_a)
+    data_b = raw_b.get_data(picks=picks_b, start=start_b, stop=stop_b)
+
+    # Plot-time downsampling (decimate) to avoid heavy resample logic + avoid surprises
+    data_a, times = _downsample_for_plot_array(data_a, sfreq=sfreq_a)
+    data_b, _ = _downsample_for_plot_array(data_b, sfreq=sfreq_b)
+
+    data_a = _zscore_rows(data_a)
+    data_b = _zscore_rows(data_b)
 
     fig = plt.figure(figsize=(12, 7))
     ax = fig.add_subplot(111)
 
-    # Tableau-like qualitative palette (explicit, stable)
     palette = (
         "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
         "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC",
@@ -237,7 +240,7 @@ def _save_timeseries_comparison(
     offset = 4.0
     offsets = np.arange(len(chosen)) * offset
 
-    # Original: uniform gray
+    # Original
     for i in range(len(chosen)):
         ax.plot(
             times,
@@ -248,7 +251,7 @@ def _save_timeseries_comparison(
             zorder=1,
         )
 
-    # Analysis: colored per channel
+    # Analysis
     for i in range(len(chosen)):
         ax.plot(
             times,
@@ -259,13 +262,29 @@ def _save_timeseries_comparison(
             zorder=2,
         )
 
+    # -------------------------------------------------------------------------
+    # Sanity check: are all analysis channels identical (up to numerical tol)?
+    # If yes, the figure is misleading; flag it loudly.
+    # -------------------------------------------------------------------------
+    if _rows_all_close(data_b):
+        ax.text(
+            0.01,
+            0.99,
+            "WARNING: analysis traces are identical across channels.\n"
+            "This usually indicates a CAR/transform bug (signal broadcast) or a data-view aliasing issue.",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=10,
+            bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "none"},
+        )
+
     ax.set_title(f"Time-series QC ({tmin:.0f}–{tmax:.0f}s): {label_a} vs {label_b}")
     ax.set_xlabel("Time (s)")
     ax.set_yticks(offsets)
     ax.set_yticklabels(chosen)
     ax.grid(True, alpha=0.2)
 
-    # Legend: only two entries (no channel clutter)
     ax.plot([], [], color="#B0B0B0", linewidth=0.9, label=label_a)
     ax.plot([], [], color=palette[0], linewidth=1.6, label=label_b)
     ax.legend(loc="upper right", frameon=True)
@@ -274,6 +293,42 @@ def _save_timeseries_comparison(
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
+
+def _time_range_to_samples(raw: mne.io.BaseRaw, *, tmin: float, tmax: float) -> tuple[int, int]:
+    sfreq = float(raw.info["sfreq"])
+    start = int(round(tmin * sfreq))
+    stop = int(round(tmax * sfreq))
+    start = max(0, min(start, raw.n_times))
+    stop = max(start, min(stop, raw.n_times))
+    return start, stop
+
+
+def _downsample_for_plot_array(data: np.ndarray, *, sfreq: float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Cheap deterministic downsampling for plotting (decimation).
+    Returns (data_ds, times_ds).
+    """
+    if sfreq <= _TIMESERIES_DOWNSAMPLE_MAX_HZ:
+        times = np.arange(data.shape[1], dtype=float) / sfreq
+        return data, times
+
+    decim = int(np.floor(sfreq / _TIMESERIES_DOWNSAMPLE_MAX_HZ))
+    decim = max(1, decim)
+
+    data_ds = data[:, ::decim]
+    sfreq_ds = sfreq / decim
+    times_ds = np.arange(data_ds.shape[1], dtype=float) / sfreq_ds
+    return data_ds, times_ds
+
+
+def _rows_all_close(data: np.ndarray, *, rtol: float = 1e-6, atol: float = 1e-8) -> bool:
+    """
+    True if all rows are (nearly) identical to the first row.
+    """
+    if data.shape[0] <= 1:
+        return False
+    ref = data[0:1, :]
+    return bool(np.allclose(data, ref, rtol=rtol, atol=atol))
 
 
 def _choose_channels_for_display(raw: mne.io.BaseRaw, candidates: Sequence[str], n: int) -> list[str]:
