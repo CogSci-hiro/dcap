@@ -7,7 +7,6 @@
 # =============================================================================
 
 from pathlib import Path
-import re
 from typing import Optional
 
 from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
