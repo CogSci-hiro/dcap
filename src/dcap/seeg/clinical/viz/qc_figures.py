@@ -45,39 +45,52 @@ def make_qc_figures(
     -------
     fig_paths
         Mapping figure_key -> file path (as str).
-
-    Usage example
-    -------------
-        fig_paths = make_qc_figures(
-            out_dir=Path("./out"),
-            raw_original=views["original"],
-            raw_analysis=views["car"],
-            analysis_view_name="car",
-            subject_id="sub-001",
-            session_id="ses-01",
-            run_id="run-1",
-        )
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     base = _make_base_name(subject_id=subject_id, session_id=session_id, run_id=run_id)
 
-    psd_path = out_dir / f"{base}_qc_psd_original-vs-{analysis_view_name}.png"
-    ts_path = out_dir / f"{base}_qc_timeseries_original-vs-{analysis_view_name}.png"
+    # -------------------------------------------------------------------------
+    # Resolve an *effective* analysis label so we don't end up with nonsense like
+    # "original vs original" when the view name is mis-propagated upstream.
+    # -------------------------------------------------------------------------
+    effective_view_name = analysis_view_name
+
+    if analysis_view_name == "original":
+        # If it's literally the same object, fine.
+        if raw_analysis is raw_original:
+            effective_view_name = "original"
+        else:
+            # Heuristic: bipolar reref often changes channel names (e.g., "A1-A2")
+            orig_set = set(raw_original.ch_names)
+            ana_set = set(raw_analysis.ch_names)
+
+            # If analysis introduces many new channels with "-" it's very likely bipolar.
+            new_ch = [ch for ch in raw_analysis.ch_names if ch not in orig_set]
+            looks_bipolar = any("-" in ch for ch in new_ch) or any("-" in ch for ch in raw_analysis.ch_names)
+
+            if looks_bipolar:
+                effective_view_name = "bipolar"
+            else:
+                # Generic fallback: it's not original, even if upstream label said so.
+                effective_view_name = "analysis"
+
+    psd_path = out_dir / f"{base}_qc_psd_original-vs-{effective_view_name}.png"
+    ts_path = out_dir / f"{base}_qc_timeseries_original-vs-{effective_view_name}.png"
 
     _save_psd_comparison(
         path=psd_path,
         raw_a=raw_original,
         label_a="original",
         raw_b=raw_analysis,
-        label_b=analysis_view_name,
+        label_b=effective_view_name,
     )
     _save_timeseries_comparison(
         path=ts_path,
         raw_a=raw_original,
         label_a="original",
         raw_b=raw_analysis,
-        label_b=analysis_view_name,
+        label_b=effective_view_name,
     )
 
     return {
@@ -171,8 +184,13 @@ def _save_timeseries_comparison(
 ) -> None:
     """
     Save a stacked time-series plot for a subset of channels.
+
+    Visual encoding (clinician-friendly)
+    -----------------------------------
+    - Original: light gray (all channels), thin
+    - Analysis view: colored (per channel), thicker
+    This avoids the "solid vs dashed but different colors" confusion.
     """
-    # Use channel selection from A, but apply to both (intersection)
     picks_a = _pick_seeg_like_channels(raw_a)
     if picks_a.size == 0:
         fig = plt.figure()
@@ -194,7 +212,6 @@ def _save_timeseries_comparison(
 
     chosen = _choose_channels_for_display(raw_a, common, n=_TIMESERIES_N_CHANNELS)
 
-    # Window: first 30 seconds (or full length if shorter)
     duration = min(_TIMESERIES_DURATION_SEC, raw_a.times[-1] if raw_a.n_times > 1 else 0.0)
     tmin, tmax = 0.0, float(duration)
 
@@ -204,33 +221,59 @@ def _save_timeseries_comparison(
     raw_a_seg = _maybe_downsample_for_plot(raw_a_seg)
     raw_b_seg = _maybe_downsample_for_plot(raw_b_seg)
 
-    data_a = raw_a_seg.get_data()
-    data_b = raw_b_seg.get_data()
+    data_a = _zscore_rows(raw_a_seg.get_data())
+    data_b = _zscore_rows(raw_b_seg.get_data())
     times = raw_a_seg.times
 
     fig = plt.figure(figsize=(12, 7))
     ax = fig.add_subplot(111)
 
-    # Normalize per-channel for readability: z-score within channel
-    data_a = _zscore_rows(data_a)
-    data_b = _zscore_rows(data_b)
+    # Tableau-like qualitative palette (explicit, stable)
+    palette = (
+        "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
+        "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC",
+    )
 
-    offset = 4.0  # spacing between traces in z units
-    for i, ch in enumerate(chosen):
-        ax.plot(times, data_a[i] + i * offset, linewidth=0.8)
-    # Overlay analysis view with dashed lines
-    for i, ch in enumerate(chosen):
-        ax.plot(times, data_b[i] + i * offset, linewidth=0.8, linestyle="--")
+    offset = 4.0
+    offsets = np.arange(len(chosen)) * offset
 
-    ax.set_title(f"Time-series QC ({tmin:.0f}–{tmax:.0f}s): {label_a} (solid) vs {label_b} (dashed)")
+    # Original: uniform gray
+    for i in range(len(chosen)):
+        ax.plot(
+            times,
+            data_a[i] + offsets[i],
+            color="#B0B0B0",
+            linewidth=0.9,
+            alpha=0.9,
+            zorder=1,
+        )
+
+    # Analysis: colored per channel
+    for i in range(len(chosen)):
+        ax.plot(
+            times,
+            data_b[i] + offsets[i],
+            color=palette[i % len(palette)],
+            linewidth=1.6,
+            alpha=0.95,
+            zorder=2,
+        )
+
+    ax.set_title(f"Time-series QC ({tmin:.0f}–{tmax:.0f}s): {label_a} vs {label_b}")
     ax.set_xlabel("Time (s)")
-    ax.set_yticks([i * offset for i in range(len(chosen))])
+    ax.set_yticks(offsets)
     ax.set_yticklabels(chosen)
     ax.grid(True, alpha=0.2)
+
+    # Legend: only two entries (no channel clutter)
+    ax.plot([], [], color="#B0B0B0", linewidth=0.9, label=label_a)
+    ax.plot([], [], color=palette[0], linewidth=1.6, label=label_b)
+    ax.legend(loc="upper right", frameon=True)
 
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
+
 
 
 def _choose_channels_for_display(raw: mne.io.BaseRaw, candidates: Sequence[str], n: int) -> list[str]:
