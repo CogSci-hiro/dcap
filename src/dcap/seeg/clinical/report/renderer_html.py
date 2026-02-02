@@ -5,7 +5,7 @@
 # =============================================================================
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -40,6 +40,8 @@ class HtmlClinicalReportRenderer:
 
         prov_df = _provenance_table(bundle)
         warn_df = _warnings_table(bundle)
+
+        qc_figs = _discover_qc_figures(out_dir)
 
         # ---------------------------------------------------------------------
         # Placeholder figures
@@ -95,6 +97,7 @@ class HtmlClinicalReportRenderer:
             trf_scores_bar_rel=relpath_for_embed(fig_trf_scores_bar, base_dir=out_dir),
             score_df=score_df,
             score_table_rel=score_table_rel,
+            qc_figs=qc_figs
         )
 
         report_path.write_text(html, encoding="utf-8")
@@ -133,12 +136,13 @@ def _render_html(
     trf_scores_bar_rel: str,
     score_df: Optional[pd.DataFrame],
     score_table_rel: Optional[str],
+    qc_figs: Dict[str, List[Path]],
 ) -> str:
     subject = bundle.subject_id
     session = bundle.session_id or "(none)"
     run = bundle.run_id or "(none)"
 
-    qc_html = _render_qc_html(bundle)
+    qc_html = _render_qc_html(bundle, out_dir=out_dir, qc_figs=qc_figs)
     electrodes_html = _render_electrodes_html(electrode_names=electrode_names, electrodes_3d_rel=electrodes_3d_rel)
     trf_html = _render_trf_html(
         bundle=bundle,
@@ -213,6 +217,21 @@ def _render_html(
       background: #fff;
     }}
     .small {{ font-size: 0.9rem; color: var(--muted); }}
+    
+        .gallery {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }}
+    .gallery-item {{
+      margin: 0;
+    }}
+    figure.gallery-item img.figure {{
+      width: 100%;
+      height: auto;
+    }}
+
   </style>
 </head>
 <body>
@@ -278,7 +297,7 @@ def _render_html(
 """
 
 
-def _render_qc_html(bundle: ClinicalAnalysisBundle) -> str:
+def _render_qc_html(bundle: ClinicalAnalysisBundle, *, out_dir: Path, qc_figs: Dict[str, List[Path]]) -> str:
     if bundle.qc is None:
         return "<em>(QC not computed)</em>"
 
@@ -305,6 +324,10 @@ def _render_qc_html(bundle: ClinicalAnalysisBundle) -> str:
         ["channel", "variance", "log10_variance", "is_flat", "is_outlier"],
     ].copy()
     parts.append(df_to_html_table(flagged))
+
+    parts.append(_render_existing_png_gallery(title="PSD", paths=qc_figs.get("psd", []), out_dir=out_dir))
+    parts.append(
+        _render_existing_png_gallery(title="Time series", paths=qc_figs.get("timeseries", []), out_dir=out_dir))
     return "\n".join(parts)
 
 
@@ -400,3 +423,158 @@ def _render_trf_html(
 
     {warn_html}
     """
+
+
+def _find_pngs_under(
+    root: Path,
+    *,
+    max_depth: int = 3,
+) -> List[Path]:
+    """
+    Find PNG images under a root directory, limited by depth.
+
+    Usage example
+    -------------
+        pngs = _find_pngs_under(Path("out"))
+    """
+    if not root.exists():
+        return []
+
+    root = root.resolve()
+    results: list[Path] = []
+
+    # Depth-limited walk (simple + deterministic)
+    for path in root.rglob("*.png"):
+        try:
+            rel_parts = path.resolve().relative_to(root).parts
+        except Exception:
+            continue
+
+        if len(rel_parts) <= max_depth + 1:
+            results.append(path)
+
+    # Sort to keep deterministic ordering
+    return sorted(results, key=lambda p: p.as_posix())
+
+
+def _score_path_by_keywords(path: Path, keywords: Sequence[str]) -> int:
+    """
+    Score a path by keyword hits in filename and parent names.
+
+    Higher score = better match.
+
+    Usage example
+    -------------
+        score = _score_path_by_keywords(Path("qc_psd.png"), ["psd"])
+    """
+    text = (path.as_posix()).lower()
+    score = 0
+    for kw in keywords:
+        if kw in text:
+            score += 10
+    # Prefer shorter paths (usually more canonical)
+    score -= len(text) // 50
+    return score
+
+
+def _pick_best_matches(
+    png_paths: Sequence[Path],
+    *,
+    keywords: Sequence[str],
+    k: int = 4,
+) -> List[Path]:
+    """
+    Pick up to k best-matching PNGs by keyword score.
+
+    Usage example
+    -------------
+        best = _pick_best_matches(pngs, keywords=["psd"])
+    """
+    scored: list[Tuple[int, Path]] = []
+    for p in png_paths:
+        scored.append((_score_path_by_keywords(p, keywords), p))
+
+    scored.sort(key=lambda t: t[0], reverse=True)
+    best = [p for s, p in scored if s > 0][:k]
+    return best
+
+
+def _discover_qc_figures(out_dir: Path) -> Dict[str, List[Path]]:
+    """
+    Discover existing QC figures created elsewhere (e.g., make_qc_figures).
+
+    Returns
+    -------
+    figures
+        Dict with keys:
+        - "psd": list of png paths
+        - "timeseries": list of png paths
+
+    Usage example
+    -------------
+        figs = _discover_qc_figures(Path("out/sub-001"))
+    """
+    candidate_roots = [
+        out_dir,
+        out_dir / "qc",
+        out_dir / "qc_figures",
+        out_dir / "figures",
+        out_dir / "plots",
+    ]
+
+    pngs: list[Path] = []
+    for root in candidate_roots:
+        pngs.extend(_find_pngs_under(root, max_depth=4))
+
+    # De-dup (by resolved path)
+    unique: dict[str, Path] = {}
+    for p in pngs:
+        unique[p.resolve().as_posix()] = p
+    pngs = sorted(unique.values(), key=lambda p: p.as_posix())
+
+    psd_keywords = ["psd", "power", "spectrum", "welch"]
+    ts_keywords = ["timeseries", "time_series", "timeseries", "raw", "trace", "overview"]
+
+    return {
+        "psd": _pick_best_matches(pngs, keywords=psd_keywords, k=4),
+        "timeseries": _pick_best_matches(pngs, keywords=ts_keywords, k=4),
+    }
+
+
+def _render_existing_png_gallery(
+    *,
+    title: str,
+    paths: Sequence[Path],
+    out_dir: Path,
+) -> str:
+    """
+    Render an HTML gallery for existing PNG files.
+
+    Usage example
+    -------------
+        html = _render_existing_png_gallery(
+            title="PSD",
+            paths=[Path("out/qc_psd.png")],
+            out_dir=Path("out"),
+        )
+    """
+    if not paths:
+        return f"<h3>{title}</h3><em>(not found)</em>"
+
+    items: list[str] = [f"<h3>{title}</h3>"]
+    items.append('<div class="gallery">')
+
+    for p in paths:
+        rel = relpath_for_embed(p, base_dir=out_dir)
+        items.append(
+            f"""
+            <figure class="gallery-item">
+              <img class="figure" src="{rel}" alt="{title}" />
+              <figcaption class="small mono">{rel}</figcaption>
+            </figure>
+            """
+        )
+
+    items.append("</div>")
+    return "\n".join(items)
+
