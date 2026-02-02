@@ -30,7 +30,6 @@ from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
 from dcap.bids.core.transforms import apply_channel_types, build_default_seeg_channel_types
 
 
-
 # =============================================================================
 # Public result types
 # =============================================================================
