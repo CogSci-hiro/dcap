@@ -57,7 +57,7 @@ def plot_electrodes_3d(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     marker: str = DEFAULT_MARKER,
-    base_size: float = 200.0,
+    base_size: float = 20.0,
     highlight_size: float = 280.0,
     annotate: bool = False,
     style: StyleConfig = DEFAULT_STYLE,
@@ -121,6 +121,13 @@ def plot_electrodes_3d(
         surfaces=DEFAULT_SURFACE,
     )
 
+    plotter = brain_fig.plotter
+    _harden_plotter(plotter)
+
+    # Compute brain center from scene bounds (xmin,xmax,ymin,ymax,zmin,zmax)
+    xmin, xmax, ymin, ymax, zmin, zmax = plotter.bounds
+    brain_center = np.array([(xmin + xmax) / 2.0, (ymin + ymax) / 2.0, (zmin + zmax) / 2.0], dtype=float)
+
     # HARDEN plotter like your working minimal script
     plotter = brain_fig.plotter
     _harden_plotter(plotter)
@@ -151,16 +158,25 @@ def plot_electrodes_3d(
             ax = axes[i // 2, i % 2]
 
             # Optional: per-view focalpoint centering using subset (old heuristic)
-            xyz_focus = _select_xyz_for_view(names=names, xyz_m=xyz_m, view_name=view.name)
-            focalpoint = xyz_focus.mean(axis=0) if xyz_focus.size else "auto"
+
+            # Precompute once, outside the loop:
+            global_center_m, global_extent_m = _compute_scene_center_and_extent(xyz_m=xyz_m)
+
+            # A stable camera distance. 6–10× extent works well.
+            camera_distance = float(6.0 * global_extent_m)
+
+            mask = _view_subset_mask(names=names, view_name=view.name)
+            xyz_focus = xyz_m[mask] if np.any(mask) else xyz_m
+
+            focus_center_m, _ = _compute_scene_center_and_extent(xyz_m=xyz_focus)
 
             mne.viz.set_3d_view(
                 figure=brain_fig,
                 azimuth=view.azimuth,
                 elevation=view.elevation,
                 roll=view.roll,
-                distance="auto",
-                focalpoint=focalpoint,
+                distance=camera_distance,  # <-- key change: no "auto"
+                focalpoint=brain_center,    # <-- key change
             )
 
             # Force one render before snapshot (helps avoid hangs)
@@ -336,3 +352,31 @@ def _prepare_values(
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=mpl.cm.get_cmap(cmap))
     sm.set_array(values[finite])
     return values, norm, sm
+
+
+def _compute_scene_center_and_extent(*, xyz_m: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    Compute a stable scene center and extent from electrode coordinates.
+
+    Returns
+    -------
+    center_m : (3,) ndarray
+        Mean position in meters.
+    extent_m : float
+        A robust size scale (max distance from center), in meters.
+    """
+    center = np.mean(xyz_m, axis=0)
+    radii = np.linalg.norm(xyz_m - center[None, :], axis=1)
+    extent = float(np.max(radii)) if xyz_m.shape[0] > 1 else 0.05  # 5 cm fallback
+    extent = max(extent, 0.02)  # floor at 2 cm so we don't zoom too hard
+    return center, extent
+
+
+def _view_subset_mask(*, names: np.ndarray, view_name: str) -> np.ndarray:
+    name_list = [str(n) for n in names]
+    if view_name == "Right":
+        return np.array(["'" not in n for n in name_list], dtype=bool)
+    if view_name == "Left":
+        return np.array(["'" in n for n in name_list], dtype=bool)
+    return np.ones(len(name_list), dtype=bool)
+
