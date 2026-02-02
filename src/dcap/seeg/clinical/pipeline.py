@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 import mne
+import pandas as pd
 
 from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle, ClinicalAnalysisNotes
 from dcap.seeg.clinical.configs import ClinicalAnalysisConfig
@@ -66,6 +67,152 @@ from dcap.seeg.trf.contracts import TRFConfig, TRFInput, TRFResult
 from dcap.seeg.clinical.viz.qc_figures import make_qc_figures
 from dcap.seeg.clinical.qc import compute_clinical_qc
 from dcap.seeg.clinical.trf.runner_analysis_trf import run_trf_with_analysis_trf
+
+
+# =============================================================================
+# Electrode normalization
+# =============================================================================
+
+def _normalize_electrodes_df(
+    *,
+    electrodes_table: Optional[Any],
+    coords_cfg: Optional[CoordinatesConfig],
+) -> tuple[Optional[pd.DataFrame], Optional[str], list[str]]:
+    """
+    Convert and normalize electrode metadata into a canonical DataFrame.
+
+    Parameters
+    ----------
+    electrodes_table
+        Upstream electrode table. May be a DataFrame, dict-like, or None.
+    coords_cfg
+        Optional configuration describing coordinate semantics.
+
+    Returns
+    -------
+    electrodes_df
+        Canonical electrode table or None.
+    coords_space
+        Single coordinate space label if known/consistent (e.g. "MNI"), else None.
+    warnings
+        Human-readable warnings describing any normalization issues.
+
+    Canonical schema (minimum)
+    --------------------------
+    | name | x | y | z | space |
+    """
+    warnings: list[str] = []
+
+    if electrodes_table is None:
+        return None, None, warnings
+
+    # -------------------------------------------------------------------------
+    # 1) Convert to DataFrame (best effort)
+    # -------------------------------------------------------------------------
+    if isinstance(electrodes_table, pd.DataFrame):
+        df = electrodes_table.copy()
+    elif isinstance(electrodes_table, dict):
+        # Common case: {"LA1": [x, y, z], "LA2": [x, y, z], ...}
+        try:
+            df = pd.DataFrame(
+                [{"name": str(k), "coords": v} for k, v in electrodes_table.items()]
+            )
+        except Exception as e:
+            warnings.append(f"Could not convert electrodes_table dict to DataFrame: {e}")
+            return None, None, warnings
+    else:
+        warnings.append(f"Unsupported electrodes_table type: {type(electrodes_table)!r}")
+        return None, None, warnings
+
+    if df.empty:
+        return None, None, warnings
+
+    # -------------------------------------------------------------------------
+    # 2) Standardize electrode name column -> 'name'
+    # -------------------------------------------------------------------------
+    if "name" not in df.columns:
+        for candidate in ("electrode", "electrode_name", "label", "contact", "channel"):
+            if candidate in df.columns:
+                df = df.rename(columns={candidate: "name"})
+                break
+
+    if "name" not in df.columns:
+        warnings.append("Electrode table missing a name column (expected 'name').")
+        return None, None, warnings
+
+    df["name"] = df["name"].astype(str)
+
+    # -------------------------------------------------------------------------
+    # 3) Standardize coordinates -> 'x','y','z'
+    # -------------------------------------------------------------------------
+    # Accepted inputs:
+    # - already has x/y/z
+    # - has 'coords' (sequence length >=3)
+    # - has 'x','y','z' but in different casing
+    lower_cols = {c.lower(): c for c in df.columns}
+    for axis in ("x", "y", "z"):
+        if axis not in df.columns and axis in lower_cols:
+            df = df.rename(columns={lower_cols[axis]: axis})
+
+    if all(axis in df.columns for axis in ("x", "y", "z")):
+        # Ensure numeric
+        for axis in ("x", "y", "z"):
+            df[axis] = pd.to_numeric(df[axis], errors="coerce")
+    elif "coords" in df.columns:
+        def _get_coord(v: Any, idx: int) -> float:
+            try:
+                return float(v[idx])
+            except Exception:
+                return float("nan")
+
+        df["x"] = df["coords"].map(lambda v: _get_coord(v, 0))
+        df["y"] = df["coords"].map(lambda v: _get_coord(v, 1))
+        df["z"] = df["coords"].map(lambda v: _get_coord(v, 2))
+    else:
+        warnings.append("Electrode table missing coordinates (need x/y/z or 'coords').")
+
+    # Drop rows without usable names
+    df = df.loc[df["name"].notna() & (df["name"].astype(str) != "")].copy()
+
+    # -------------------------------------------------------------------------
+    # 4) Coordinate space handling
+    # -------------------------------------------------------------------------
+    coords_space: Optional[str] = None
+
+    # If a 'space' column exists, use it
+    if "space" in df.columns:
+        spaces = df["space"].dropna().astype(str).unique().tolist()
+        if len(spaces) == 1:
+            coords_space = spaces[0]
+        elif len(spaces) > 1:
+            warnings.append(f"Multiple coordinate spaces present in electrode table: {spaces}")
+    else:
+        # If coords_cfg has a space field, use it (depends on your CoordinatesConfig)
+        # Update this block once you confirm field names.
+        if coords_cfg is not None and hasattr(coords_cfg, "space"):
+            value = getattr(coords_cfg, "space")
+            coords_space = None if value is None else str(value)
+
+        if coords_space is not None:
+            df["space"] = coords_space
+
+    # -------------------------------------------------------------------------
+    # 5) Final canonical columns first (keep extras)
+    # -------------------------------------------------------------------------
+    canonical_first = [c for c in ["name", "x", "y", "z", "space"] if c in df.columns]
+    other_cols = [c for c in df.columns if c not in canonical_first]
+    df = df[canonical_first + other_cols]
+
+    # Warn if coordinates are mostly missing (affects 3D plots)
+    if not all(axis in df.columns for axis in ("x", "y", "z")):
+        warnings.append("Electrode coordinates unavailable; 3D localization plots will be placeholders.")
+    else:
+        frac_nan = float(df[["x", "y", "z"]].isna().any(axis=1).mean())
+        if frac_nan > 0.2:
+            warnings.append(f"Many electrodes missing x/y/z (fraction with any NaN: {frac_nan:.2f}).")
+
+    return df, coords_space, warnings
+
 
 
 def run_clinical_analysis(
@@ -326,6 +473,18 @@ def run_clinical_analysis(
     #
     bundle_notes = ClinicalAnalysisNotes(items=dict(notes) if notes is not None else {})
 
+    # -------------------------------------------------------------------------
+    # Step 7a: normalize electrodes for reporting / viz
+    # -------------------------------------------------------------------------
+    electrodes_df, coords_space, electrode_warnings = _normalize_electrodes_df(
+        electrodes_table=electrodes_table,
+        coords_cfg=coords_cfg,
+    )
+
+    # Record electrode normalization warnings into provenance decisions (or warnings)
+    if electrode_warnings:
+        preproc_result.ctx.decisions["electrodes_normalization_warnings"] = electrode_warnings
+
     return ClinicalAnalysisBundle(
         subject_id=subject_id,
         session_id=session_id,
@@ -337,4 +496,6 @@ def run_clinical_analysis(
         trf_result=trf_result,
         qc=qc,
         notes=bundle_notes,
+        electrodes_df=electrodes_df,
+        coords_space=coords_space,
     )
