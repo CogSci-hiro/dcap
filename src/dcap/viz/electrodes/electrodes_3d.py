@@ -3,12 +3,16 @@
 #                     #        ELECTRODE 3D LOCALIZATION      #
 #                     ########################################
 # =============================================================================
-"""Static 3D electrode localization plot for clinical HTML reports."""
+"""Static 3D electrode localization plot with fsaverage underlay (PyVistaQt screenshots)."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
+
+import matplotlib
+matplotlib.use("Agg", force=True)
 
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -17,9 +21,8 @@ import pandas as pd
 
 from dcap.viz.style import DEFAULT_STYLE, StyleConfig
 
-from .geometry import compute_equal_aspect_limits
 from .validate import validate_and_clean_electrodes_df
-from .views import VIEWS_2X2
+from .views import VIEWS_2X2, MNEViewSpec
 
 
 # =============================================================================
@@ -27,20 +30,25 @@ from .views import VIEWS_2X2
 #                     #               CONSTANTS               #
 #                     ########################################
 # =============================================================================
-AXIS_LABELS = ("X", "Y", "Z")
+DEFAULT_SURFACE = "white"
+FOCAL_POINT = "auto"
 
-# Clinical-safe default colors (muted)
-DEFAULT_POINT_COLOR = "0.35"  # grayscale string
-HIGHLIGHT_POINT_COLOR = "0.10"
+MM_TO_M = 1.0 / 1000.0
 
-DEFAULT_ALPHA = 0.95
-DEFAULT_EDGE_COLOR = "0.1"
-DEFAULT_EDGE_WIDTH = 0.6
+COLORBAR_RECT = (0.15, 0.05, 0.7, 0.02)  # (left, bottom, width, height)
+COLORBAR_ORIENTATION = "horizontal"
 
-GRID_ALPHA = 0.25
-TITLE_FONT_WEIGHT = "semibold"
+DEFAULT_ALPHA = 1.0
+DEFAULT_CMAP = "inferno"
+
+VTK_WINDOW_SIZE_PX = (800, 800)
 
 
+# =============================================================================
+#                     ########################################
+#                     #              PUBLIC API               #
+#                     ########################################
+# =============================================================================
 def plot_electrodes_3d(
     *,
     electrodes_df: pd.DataFrame,
@@ -51,246 +59,267 @@ def plot_electrodes_3d(
     figsize: tuple[float, float] = (6.0, 6.0),
     dpi: int = 150,
     values_col: Optional[str] = None,
-    cmap: str = "viridis",
+    cmap: str = DEFAULT_CMAP,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
-    marker: str = "o",
-    base_size: float = 18.0,
-    highlight_size: float = 40.0,
-    annotate: bool = False,
+    marker: str = "o",  # kept for API compat; in 3D we render spheres
+    base_size: float = 200.0,  # interpreted as "visual weight", mapped to point_size
+    highlight_size: float = 280.0,
+    annotate: bool = False,  # not implemented in 3D screenshot version (hook kept)
     style: StyleConfig = DEFAULT_STYLE,
 ) -> None:
     """
-    Plot 3D electrode locations (4 views) and save as a single PNG.
+    Plot 3D electrode locations on an fsaverage brain outline and save a 2×2 PNG.
 
     Parameters
     ----------
     electrodes_df
-        Canonical electrode table with at least columns:
-        - "name": str
-        - "x", "y", "z": numeric (coordinates)
-
-        Example format:
-
-        +------+-------+-------+------+-------+--------+
-        | name | x     | y     | z    | space | score  |
-        +------+-------+-------+------+-------+--------+
-        | LA1  | -34.2 | -12.0 | 18.5 | MNI   | 0.12   |
-        | LA2  | -33.7 | -10.9 | 16.9 | MNI   | 0.08   |
-        | RA1  |  29.1 |  -8.4 | 21.2 | MNI   | 0.31   |
-        +------+-------+-------+------+-------+--------+
-
+        Must include: name, x, y, z (mm). Optionally include values_col.
     out_path
-        Destination PNG path. Parent directories are created if needed.
+        PNG output path.
     coords_space
-        Optional coordinate space label (e.g., "MNI", "T1w", "patient").
-        Used for axis/title labeling only.
+        Label for title/metadata only.
     title
-        Optional plot title. If None, a default is generated.
+        Optional title; if None uses a default.
     highlight
         Optional list of electrode names to emphasize.
-    figsize
-        Matplotlib figure size in inches.
-    dpi
-        Output resolution (overrides style.dpi if provided).
     values_col
-        Optional numeric column name to color-code electrodes (with colorbar).
-    cmap
-        Matplotlib colormap name for values_col.
-    vmin, vmax
-        Optional color scaling bounds for values_col. If None, inferred from data.
-    marker
-        Matplotlib marker for electrodes.
-    base_size, highlight_size
-        Scatter sizes for normal and highlighted electrodes.
-    annotate
-        If True, label points with electrode names (small font).
-    style
-        Global styling config (fonts). Defaults to DEFAULT_STYLE.
-
-    Returns
-    -------
-    None
-        Writes PNG to `out_path`.
+        Optional numeric column to color electrodes by.
     """
+    import mne  # noqa: WPS433
+    import pyvista as pv  # noqa: WPS433
+
+    # Must be set before any plotter is created
+    os.environ["PYVISTA_OFF_SCREEN"] = "true"
+
+    # Your environment uses pyvistaqt; that's okay as long as we never enter the interactor loop.
+    mne.viz.set_3d_backend("pyvistaqt")
+    pv.OFF_SCREEN = True
+
     cleaned_df = validate_and_clean_electrodes_df(electrodes_df, values_col=values_col)
+    if cleaned_df.empty:
+        raise ValueError("electrodes_df is empty after cleaning.")
 
     names = cleaned_df["name"].astype(str).to_numpy()
-    xyz = cleaned_df[["x", "y", "z"]].to_numpy(dtype=float)
+    xyz_m = cleaned_df[["x", "y", "z"]].to_numpy(dtype=float) * MM_TO_M
 
     highlight_set = set(highlight or [])
-    is_highlight = np.array([name in highlight_set for name in names], dtype=bool)
-
-    xlim, ylim, zlim = compute_equal_aspect_limits(xyz)
-
-    effective_dpi = int(dpi) if dpi is not None else int(style.dpi)
-    fig, axes = _make_figure(figsize=figsize, dpi=effective_dpi, font_size=style.font_size)
 
     coords_label = coords_space or (cleaned_df["space"].iloc[0] if "space" in cleaned_df.columns else None)
     plot_title = title or _default_title(coords_label=coords_label)
 
-    fig.suptitle(plot_title, fontsize=style.font_size + 2, fontweight=TITLE_FONT_WEIGHT)
+    effective_dpi = int(dpi) if dpi is not None else int(style.dpi)
 
-    # Optional value-based coloring
-    scatter_mappable: Optional[mpl.cm.ScalarMappable] = None
-    colors = None
-    if values_col is not None:
-        values = pd.to_numeric(cleaned_df[values_col], errors="coerce").to_numpy(dtype=float)
-        finite_values_mask = np.isfinite(values)
-        # If some values are missing, we'll still plot those electrodes in neutral gray.
-        # (We keep geometry stable, no row dropping here.)
-        value_vmin = float(np.nanmin(values[finite_values_mask])) if vmin is None else float(vmin)
-        value_vmax = float(np.nanmax(values[finite_values_mask])) if vmax is None else float(vmax)
+    # Values for coloring
+    values, norm, scalar_mappable = _prepare_values(
+        cleaned_df=cleaned_df,
+        values_col=values_col,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+    )
 
-        norm = mpl.colors.Normalize(vmin=value_vmin, vmax=value_vmax)
-        colormap = mpl.cm.get_cmap(cmap)
-        colors = np.array([DEFAULT_POINT_COLOR] * len(values), dtype=object)
-        colors[finite_values_mask] = [colormap(norm(v)) for v in values[finite_values_mask]]
+    montage = _make_mne_montage(ch_names=names, xyz_m=xyz_m)
 
-        scatter_mappable = mpl.cm.ScalarMappable(norm=norm, cmap=colormap)
-        scatter_mappable.set_array(values[finite_values_mask])
+    info = mne.create_info(
+        ch_names=list(names),
+        sfreq=1000.0,
+        ch_types=["seeg"] * len(names),
+    )
+    info.set_montage(montage)
 
-    for view_index, view in enumerate(VIEWS_2X2):
-        row = view_index // 2
-        col = view_index % 2
-        ax = axes[row, col]
+    subjects_dir = _get_fsaverage_subjects_dir(mne)
 
-        ax.view_init(elev=view.elev_deg, azim=view.azim_deg)
-        ax.set_title(view.name, fontsize=style.font_size)
+    brain_fig = mne.viz.plot_alignment(
+        info,
+        trans="fsaverage",
+        subject="fsaverage",
+        coord_frame="mri",
+        subjects_dir=subjects_dir,
+        surfaces=DEFAULT_SURFACE,
+    )
 
-        _plot_one_axis(
-            ax=ax,
-            xyz=xyz,
-            names=names,
-            is_highlight=is_highlight,
-            colors=colors,
-            marker=marker,
-            base_size=base_size,
-            highlight_size=highlight_size,
-            annotate=annotate,
-            coords_label=coords_label,
-            xlim=xlim,
-            ylim=ylim,
-            zlim=zlim,
-            font_size=style.font_size,
-        )
+    plotter = brain_fig.plotter
+    _harden_plotter(plotter)
 
-    if scatter_mappable is not None:
-        _add_colorbar(fig, scatter_mappable, label=values_col)
+    # Add electrode actors ONCE (3D), then screenshot from each view
+    _add_electrodes_to_scene(
+        pv=pv,
+        plotter=plotter,
+        names=names,
+        xyz_m=xyz_m,
+        values=values,
+        cmap=cmap,
+        norm=norm,
+        highlight_set=highlight_set,
+        base_size=base_size,
+        highlight_size=highlight_size,
+    )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=effective_dpi, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-
-
-# =============================================================================
-#                     ########################################
-#                     #             FIGURE HELPERS            #
-#                     ########################################
-# =============================================================================
-def _make_figure(
-    *,
-    figsize: tuple[float, float],
-    dpi: int,
-    font_size: int,
-) -> tuple[plt.Figure, np.ndarray]:
     mpl.rcParams.update(
         {
-            "figure.dpi": dpi,
-            "savefig.dpi": dpi,
-            "font.size": font_size,
+            "figure.dpi": effective_dpi,
+            "savefig.dpi": effective_dpi,
+            "font.size": style.font_size,
         }
     )
-    fig, axes = plt.subplots(
-        2,
-        2,
-        figsize=figsize,
-        subplot_kw={"projection": "3d"},
-        constrained_layout=True,
-    )
-    fig.patch.set_facecolor("white")
-    return fig, axes
+    fig2, axes = plt.subplots(2, 2, figsize=figsize)
+    fig2.patch.set_facecolor("white")
+    fig2.suptitle(plot_title, fontsize=max(12, style.font_size + 2))
+
+    try:
+        for i, view in enumerate(VIEWS_2X2):
+            ax = axes[i // 2, i % 2]
+
+            mne.viz.set_3d_view(
+                figure=brain_fig,
+                azimuth=view.azimuth,
+                elevation=view.elevation,
+                roll=view.roll,
+                distance="auto",
+                focalpoint=FOCAL_POINT,
+            )
+
+            plotter.render()
+            img = plotter.screenshot(return_img=True, window_size=VTK_WINDOW_SIZE_PX)
+
+            ax.imshow(img)
+            ax.set_axis_off()
+
+        if scalar_mappable is not None and values_col is not None:
+            cax = fig2.add_axes(COLORBAR_RECT)  # noqa: WPS437
+            cbar = fig2.colorbar(scalar_mappable, cax=cax, orientation=COLORBAR_ORIENTATION)
+            cbar.ax.tick_params(labelsize=max(8, style.font_size))
+            cax.set_title(values_col, fontsize=max(9, style.font_size))
+
+        fig2.tight_layout()
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig2.savefig(out_path, dpi=effective_dpi, facecolor="white")
+    finally:
+        plt.close(fig2)
+        mne.viz.close_3d_figure(brain_fig)
 
 
+# =============================================================================
+#                     ########################################
+#                     #              HELPERS                  #
+#                     ########################################
+# =============================================================================
 def _default_title(*, coords_label: Optional[str]) -> str:
     if coords_label:
         return f"Electrode localization ({coords_label})"
     return "Electrode localization"
 
 
-def _plot_one_axis(
+def _get_fsaverage_subjects_dir(mne_module) -> Path:
+    fetch = getattr(mne_module.datasets, "fetch_fsaverage", None)
+    if callable(fetch):
+        fs_dir = Path(fetch(verbose=False))
+        return fs_dir.parent
+    sample_path = Path(mne_module.datasets.sample.data_path())
+    return sample_path / "subjects"
+
+
+def _make_mne_montage(*, ch_names: np.ndarray, xyz_m: np.ndarray):
+    import mne  # noqa: WPS433
+    ch_pos = {str(name): xyz_m[i, :] for i, name in enumerate(ch_names)}
+    return mne.channels.make_dig_montage(ch_pos=ch_pos, coord_frame="mri")
+
+
+def _harden_plotter(plotter) -> None:
+    # Your proven anti-hang levers:
+    try:
+        plotter.iren = None
+    except Exception:
+        pass
+
+    try:
+        plotter.window_size = VTK_WINDOW_SIZE_PX
+    except Exception:
+        pass
+
+
+def _add_electrodes_to_scene(
     *,
-    ax: mpl.axes.Axes,
-    xyz: np.ndarray,
+    pv,
+    plotter,
     names: np.ndarray,
-    is_highlight: np.ndarray,
-    colors: Optional[np.ndarray],
-    marker: str,
+    xyz_m: np.ndarray,
+    values: Optional[np.ndarray],
+    cmap: str,
+    norm,
+    highlight_set: set[str],
     base_size: float,
     highlight_size: float,
-    annotate: bool,
-    coords_label: Optional[str],
-    xlim: tuple[float, float],
-    ylim: tuple[float, float],
-    zlim: tuple[float, float],
-    font_size: int,
 ) -> None:
-    # Base scatter
-    if colors is None:
-        base_colors = DEFAULT_POINT_COLOR
+    # Convert your "sizes" into PyVista point_size (roughly)
+    point_size = float(np.clip(base_size / 25.0, 4.0, 18.0))
+    highlight_point_size = float(np.clip(highlight_size / 20.0, point_size + 2.0, 26.0))
+
+    points = pv.PolyData(xyz_m)
+
+    if values is None:
+        plotter.add_mesh(
+            points,
+            color=(0.35, 0.35, 0.35),
+            render_points_as_spheres=True,
+            point_size=point_size,
+        )
     else:
-        base_colors = colors
+        v = values.astype(float)
+        finite = np.isfinite(v)
 
-    ax.scatter(
-        xyz[:, 0],
-        xyz[:, 1],
-        xyz[:, 2],
-        s=base_size,
-        c=base_colors,
-        marker=marker,
-        alpha=DEFAULT_ALPHA,
-        edgecolors=DEFAULT_EDGE_COLOR,
-        linewidths=DEFAULT_EDGE_WIDTH,
-    )
+        vmin = float(norm.vmin)  # type: ignore[union-attr]
+        vmax = float(norm.vmax)  # type: ignore[union-attr]
+        denom = (vmax - vmin) if (vmax - vmin) != 0 else 1.0
 
-    # Highlight overlay (if any)
-    if np.any(is_highlight):
-        xyz_h = xyz[is_highlight]
-        ax.scatter(
-            xyz_h[:, 0],
-            xyz_h[:, 1],
-            xyz_h[:, 2],
-            s=highlight_size,
-            c=HIGHLIGHT_POINT_COLOR if colors is None else None,
-            marker=marker,
-            alpha=1.0,
-            edgecolors=DEFAULT_EDGE_COLOR,
-            linewidths=DEFAULT_EDGE_WIDTH + 0.2,
+        v01 = (v - vmin) / denom
+        v01[~finite] = 0.0
+
+        points["values01"] = v01
+        plotter.add_mesh(
+            points,
+            scalars="values01",
+            cmap=cmap,
+            clim=(0.0, 1.0),
+            render_points_as_spheres=True,
+            point_size=point_size,
         )
 
-    # Optional name annotations
-    if annotate:
-        for (x, y, z), name in zip(xyz, names):
-            ax.text(x, y, z, str(name), fontsize=max(6, font_size - 2))
-
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
-    ax.set_zlim(*zlim)
-
-    xlab, ylab, zlab = AXIS_LABELS
-    if coords_label:
-        xlab = f"{xlab} ({coords_label})"
-        ylab = f"{ylab} ({coords_label})"
-        zlab = f"{zlab} ({coords_label})"
-
-    ax.set_xlabel(xlab, fontsize=font_size)
-    ax.set_ylabel(ylab, fontsize=font_size)
-    ax.set_zlabel(zlab, fontsize=font_size)
-
-    ax.grid(True, alpha=GRID_ALPHA)
+    if highlight_set:
+        mask = np.array([str(n) in highlight_set for n in names], dtype=bool)
+        if np.any(mask):
+            hi_points = pv.PolyData(xyz_m[mask])
+            plotter.add_mesh(
+                hi_points,
+                color=(0.0, 0.0, 0.0),
+                render_points_as_spheres=True,
+                point_size=highlight_point_size,
+                opacity=1.0,
+            )
 
 
-def _add_colorbar(fig: plt.Figure, mappable: mpl.cm.ScalarMappable, *, label: str) -> None:
-    # Horizontal colorbar at the bottom; keeps 2x2 grid tidy.
-    cbar = fig.colorbar(mappable, ax=fig.axes, orientation="horizontal", fraction=0.05, pad=0.04)
-    cbar.set_label(label)
+def _prepare_values(
+    *,
+    cleaned_df: pd.DataFrame,
+    values_col: Optional[str],
+    cmap: str,
+    vmin: Optional[float],
+    vmax: Optional[float],
+) -> Tuple[Optional[np.ndarray], Optional[mpl.colors.Normalize], Optional[mpl.cm.ScalarMappable]]:
+    if values_col is None:
+        return None, None, None
+
+    values = pd.to_numeric(cleaned_df[values_col], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        return None, None, None
+
+    vvmin = float(np.nanmin(values[finite])) if vmin is None else float(vmin)
+    vvmax = float(np.nanmax(values[finite])) if vmax is None else float(vmax)
+
+    norm = mpl.colors.Normalize(vmin=vvmin, vmax=vvmax)
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=mpl.cm.get_cmap(cmap))
+    sm.set_array(values[finite])
+    return values, norm, sm
