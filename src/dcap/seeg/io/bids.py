@@ -277,9 +277,11 @@ def _load_electrodes_table_from_bids(*, bids_path: "BIDSPath") -> Optional[Mappi
     """Load electrodes.tsv as a mapping channel_name -> (x,y,z) if present."""
     import pandas as pd
 
-    recording_path = Path(str(bids_path.fpath))
-    electrodes_path = recording_path.with_name(
-        recording_path.stem.replace("_ieeg", "") + "_channels.tsv"
+    electrodes_path = resolve_canonical_electrodes_tsv(
+        bids_path=bids_path,
+        bids_root=bids_path.root,
+        derivatives_name="elec_recon",
+        coords_space="MNI152"
     )
     if not electrodes_path.exists():
         return None
