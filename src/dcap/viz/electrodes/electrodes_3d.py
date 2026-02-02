@@ -3,7 +3,7 @@
 #                     #        ELECTRODE 3D LOCALIZATION      #
 #                     ########################################
 # =============================================================================
-"""Static 3D electrode localization plot with fsaverage underlay (PyVistaQt screenshots)."""
+"""Static 3D electrode localization plot with fsaverage underlay (MNE snapshot + 2D marker overlay)."""
 
 from __future__ import annotations
 
@@ -31,24 +31,18 @@ from .views import VIEWS_2X2, MNEViewSpec
 #                     ########################################
 # =============================================================================
 DEFAULT_SURFACE = "white"
-FOCAL_POINT = "auto"
-
-MM_TO_M = 1.0 / 1000.0
 
 COLORBAR_RECT = (0.15, 0.05, 0.7, 0.02)  # (left, bottom, width, height)
 COLORBAR_ORIENTATION = "horizontal"
 
+DEFAULT_MARKER = "o"
+DEFAULT_EDGE_COLOR = "k"
 DEFAULT_ALPHA = 1.0
 DEFAULT_CMAP = "inferno"
 
 VTK_WINDOW_SIZE_PX = (800, 800)
 
 
-# =============================================================================
-#                     ########################################
-#                     #              PUBLIC API               #
-#                     ########################################
-# =============================================================================
 def plot_electrodes_3d(
     *,
     electrodes_df: pd.DataFrame,
@@ -62,47 +56,40 @@ def plot_electrodes_3d(
     cmap: str = DEFAULT_CMAP,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
-    marker: str = "o",  # kept for API compat; in 3D we render spheres
-    base_size: float = 200.0,  # interpreted as "visual weight", mapped to point_size
+    marker: str = DEFAULT_MARKER,
+    base_size: float = 200.0,
     highlight_size: float = 280.0,
-    annotate: bool = False,  # not implemented in 3D screenshot version (hook kept)
+    annotate: bool = False,
     style: StyleConfig = DEFAULT_STYLE,
 ) -> None:
     """
     Plot 3D electrode locations on an fsaverage brain outline and save a 2×2 PNG.
 
-    Parameters
-    ----------
-    electrodes_df
-        Must include: name, x, y, z (mm). Optionally include values_col.
-    out_path
-        PNG output path.
-    coords_space
-        Label for title/metadata only.
-    title
-        Optional title; if None uses a default.
-    highlight
-        Optional list of electrode names to emphasize.
-    values_col
-        Optional numeric column to color electrodes by.
+    This uses MNE's snapshot_brain_montage() (like your reference) to obtain:
+    - the brain underlay image
+    - pixel-space xy locations for sensors
+    Then overlays 2D Matplotlib markers to match your original look.
     """
     import mne  # noqa: WPS433
-    import pyvista as pv  # noqa: WPS433
 
-    # Must be set before any plotter is created
+    # Must be set before creating any PyVista plotter
     os.environ["PYVISTA_OFF_SCREEN"] = "true"
 
-    # Your environment uses pyvistaqt; that's okay as long as we never enter the interactor loop.
+    # Your environment uses pyvistaqt; we keep it but prevent the GUI from taking over
     mne.viz.set_3d_backend("pyvistaqt")
-    pv.OFF_SCREEN = True
 
     cleaned_df = validate_and_clean_electrodes_df(electrodes_df, values_col=values_col)
     if cleaned_df.empty:
         raise ValueError("electrodes_df is empty after cleaning.")
 
-    names = cleaned_df["name"].astype(str).to_numpy()
-    xyz_m = cleaned_df[["x", "y", "z"]].to_numpy(dtype=float) * MM_TO_M
+    # -------------------------------------------------------------------------
+    # Units: auto-detect mm vs m to avoid double scaling
+    # -------------------------------------------------------------------------
+    xyz = cleaned_df[["x", "y", "z"]].to_numpy(dtype=float)
+    abs_max = float(np.nanmax(np.abs(xyz)))
+    xyz_m = xyz if abs_max < 1.0 else xyz * 1e-3  # meters if already < 1 m
 
+    names = cleaned_df["name"].astype(str).to_numpy()
     highlight_set = set(highlight or [])
 
     coords_label = coords_space or (cleaned_df["space"].iloc[0] if "space" in cleaned_df.columns else None)
@@ -110,16 +97,11 @@ def plot_electrodes_3d(
 
     effective_dpi = int(dpi) if dpi is not None else int(style.dpi)
 
-    # Values for coloring
-    values, norm, scalar_mappable = _prepare_values(
-        cleaned_df=cleaned_df,
-        values_col=values_col,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-    )
-
-    montage = _make_mne_montage(ch_names=names, xyz_m=xyz_m)
+    # -------------------------------------------------------------------------
+    # Montage: MNI Talairach compat (matches your reference get_montage)
+    # -------------------------------------------------------------------------
+    ch_pos = {str(name): xyz_m[i, :] for i, name in enumerate(names)}
+    montage = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos)
 
     info = mne.create_info(
         ch_names=list(names),
@@ -139,23 +121,11 @@ def plot_electrodes_3d(
         surfaces=DEFAULT_SURFACE,
     )
 
+    # HARDEN plotter like your working minimal script
     plotter = brain_fig.plotter
     _harden_plotter(plotter)
 
-    # Add electrode actors ONCE (3D), then screenshot from each view
-    _add_electrodes_to_scene(
-        pv=pv,
-        plotter=plotter,
-        names=names,
-        xyz_m=xyz_m,
-        values=values,
-        cmap=cmap,
-        norm=norm,
-        highlight_set=highlight_set,
-        base_size=base_size,
-        highlight_size=highlight_size,
-    )
-
+    # Matplotlib figure (2x2)
     mpl.rcParams.update(
         {
             "figure.dpi": effective_dpi,
@@ -167,9 +137,22 @@ def plot_electrodes_3d(
     fig2.patch.set_facecolor("white")
     fig2.suptitle(plot_title, fontsize=max(12, style.font_size + 2))
 
+    # Values colormap prep
+    values, norm, scalar_mappable = _prepare_values(
+        cleaned_df=cleaned_df,
+        values_col=values_col,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+    )
+
     try:
         for i, view in enumerate(VIEWS_2X2):
             ax = axes[i // 2, i % 2]
+
+            # Optional: per-view focalpoint centering using subset (old heuristic)
+            xyz_focus = _select_xyz_for_view(names=names, xyz_m=xyz_m, view_name=view.name)
+            focalpoint = xyz_focus.mean(axis=0) if xyz_focus.size else "auto"
 
             mne.viz.set_3d_view(
                 figure=brain_fig,
@@ -177,13 +160,73 @@ def plot_electrodes_3d(
                 elevation=view.elevation,
                 roll=view.roll,
                 distance="auto",
-                focalpoint=FOCAL_POINT,
+                focalpoint=focalpoint,
             )
 
+            # Force one render before snapshot (helps avoid hangs)
             plotter.render()
-            img = plotter.screenshot(return_img=True, window_size=VTK_WINDOW_SIZE_PX)
 
-            ax.imshow(img)
+            # The "old script magic": image + xy in pixel coords
+            xy, image = mne.viz.snapshot_brain_montage(
+                brain_fig,
+                montage,
+                hide_sensors=True,  # we draw markers ourselves (for exact style match)
+            )
+
+            ax.imshow(image)
+
+            # Assemble points in the same order as names
+            xy_points = np.vstack([xy[str(ch)] for ch in names if str(ch) in xy])
+
+            # If snapshot skipped some points, align values/highlights accordingly
+            plotted_names = [str(ch) for ch in names if str(ch) in xy]
+
+            if values is None:
+                ax.scatter(
+                    xy_points[:, 0],
+                    xy_points[:, 1],
+                    c="0.35",
+                    s=base_size,
+                    alpha=DEFAULT_ALPHA,
+                    marker=marker,
+                    edgecolor=DEFAULT_EDGE_COLOR,
+                    linewidths=0.8,
+                )
+            else:
+                name_to_value = {str(n): float(v) for n, v in zip(names, values)}
+                sel_values = np.array([name_to_value[n] for n in plotted_names], dtype=float)
+
+                ax.scatter(
+                    xy_points[:, 0],
+                    xy_points[:, 1],
+                    c=sel_values,
+                    s=base_size,
+                    alpha=DEFAULT_ALPHA,
+                    marker=marker,
+                    cmap=cmap,
+                    norm=norm,
+                    edgecolor=DEFAULT_EDGE_COLOR,
+                    linewidths=0.8,
+                )
+
+            if highlight_set:
+                hi_mask = np.array([n in highlight_set for n in plotted_names], dtype=bool)
+                if np.any(hi_mask):
+                    ax.scatter(
+                        xy_points[hi_mask, 0],
+                        xy_points[hi_mask, 1],
+                        s=highlight_size,
+                        facecolors="none",
+                        edgecolors=DEFAULT_EDGE_COLOR,
+                        linewidths=1.2,
+                        alpha=1.0,
+                    )
+
+            # Annotation hook (optional, off by default)
+            if annotate:
+                for (xpix, ypix), n in zip(xy_points, plotted_names):
+                    ax.text(xpix, ypix, n, fontsize=max(6, style.font_size - 2))
+
             ax.set_axis_off()
 
         if scalar_mappable is not None and values_col is not None:
@@ -207,9 +250,7 @@ def plot_electrodes_3d(
 #                     ########################################
 # =============================================================================
 def _default_title(*, coords_label: Optional[str]) -> str:
-    if coords_label:
-        return f"Electrode localization ({coords_label})"
-    return "Electrode localization"
+    return f"Electrode localization ({coords_label})" if coords_label else "Electrode localization"
 
 
 def _get_fsaverage_subjects_dir(mne_module) -> Path:
@@ -221,83 +262,55 @@ def _get_fsaverage_subjects_dir(mne_module) -> Path:
     return sample_path / "subjects"
 
 
-def _make_mne_montage(*, ch_names: np.ndarray, xyz_m: np.ndarray):
-    import mne  # noqa: WPS433
-    ch_pos = {str(name): xyz_m[i, :] for i, name in enumerate(ch_names)}
-    return mne.channels.make_dig_montage(ch_pos=ch_pos, coord_frame="mri")
-
-
 def _harden_plotter(plotter) -> None:
-    # Your proven anti-hang levers:
+    # Your proven anti-hang levers
     try:
         plotter.iren = None
     except Exception:
         pass
-
     try:
         plotter.window_size = VTK_WINDOW_SIZE_PX
     except Exception:
         pass
 
 
-def _add_electrodes_to_scene(
-    *,
-    pv,
-    plotter,
-    names: np.ndarray,
-    xyz_m: np.ndarray,
-    values: Optional[np.ndarray],
-    cmap: str,
-    norm,
-    highlight_set: set[str],
-    base_size: float,
-    highlight_size: float,
-) -> None:
-    # Convert your "sizes" into PyVista point_size (roughly)
-    point_size = float(np.clip(base_size / 25.0, 4.0, 18.0))
-    highlight_point_size = float(np.clip(highlight_size / 20.0, point_size + 2.0, 26.0))
+def _select_xyz_for_view(*, names: np.ndarray, xyz_m: np.ndarray, view_name: str) -> np.ndarray:
+    name_list = [str(n) for n in names]
+    if view_name == "Right":
+        mask = np.array(["'" not in n for n in name_list], dtype=bool)
+        return xyz_m[mask] if np.any(mask) else xyz_m
+    if view_name == "Left":
+        mask = np.array(["'" in n for n in name_list], dtype=bool)
+        return xyz_m[mask] if np.any(mask) else xyz_m
+    return xyz_m
 
-    points = pv.PolyData(xyz_m)
 
-    if values is None:
-        plotter.add_mesh(
-            points,
-            color=(0.35, 0.35, 0.35),
-            render_points_as_spheres=True,
-            point_size=point_size,
-        )
-    else:
-        v = values.astype(float)
-        finite = np.isfinite(v)
+def _make_dig_montage_mni_tal_compat(*, ch_pos_m: dict[str, np.ndarray]):
+    import mne
 
-        vmin = float(norm.vmin)  # type: ignore[union-attr]
-        vmax = float(norm.vmax)  # type: ignore[union-attr]
-        denom = (vmax - vmin) if (vmax - vmin) != 0 else 1.0
+    # Try the nice path
+    try:
+        return mne.channels.make_dig_montage(ch_pos=ch_pos_m, coord_frame="mni_tal")
+    except Exception:
+        pass
 
-        v01 = (v - vmin) / denom
-        v01[~finite] = 0.0
+    # Compat path for MNE builds that reject the string
+    from mne._fiff.constants import FIFF
+    from mne._fiff._digitization import DigPoint
+    from mne.channels import DigMontage
 
-        points["values01"] = v01
-        plotter.add_mesh(
-            points,
-            scalars="values01",
-            cmap=cmap,
-            clim=(0.0, 1.0),
-            render_points_as_spheres=True,
-            point_size=point_size,
-        )
-
-    if highlight_set:
-        mask = np.array([str(n) in highlight_set for n in names], dtype=bool)
-        if np.any(mask):
-            hi_points = pv.PolyData(xyz_m[mask])
-            plotter.add_mesh(
-                hi_points,
-                color=(0.0, 0.0, 0.0),
-                render_points_as_spheres=True,
-                point_size=highlight_point_size,
-                opacity=1.0,
+    dig = []
+    for name, rr in ch_pos_m.items():
+        rr = np.asarray(rr, dtype=float).reshape(3)
+        dig.append(
+            DigPoint(
+                kind=FIFF.FIFFV_POINT_EEG,
+                ident=0,
+                r=rr,
+                coord_frame=FIFF.FIFFV_COORD_MNI_TAL,
             )
+        )
+    return DigMontage(dig=dig, ch_names=list(ch_pos_m.keys()))
 
 
 def _prepare_values(
