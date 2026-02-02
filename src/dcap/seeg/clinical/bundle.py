@@ -5,21 +5,13 @@
 #                         ###############################
 # =============================================================================
 # =============================================================================
-#
-# A single immutable container that the clinical report consumes.
-#
-# Design rules
-# - Logic only: no file I/O, no CLI, no printing.
-# - Reporting consumes ONLY this bundle (plus static templates).
-# - Bundle must remain valid even when optional analyses (e.g., TRF) are missing.
-#
-# =============================================================================
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import mne
 import numpy as np
+import pandas as pd  # NEW
 
 from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext
 from dcap.seeg.clinical.qc import ClinicalQcSummary
@@ -33,13 +25,14 @@ class ClinicalTrfResult:
     epoch_ids: List[str]
 
     # Backend-agnostic model params (from BackendFitResult)
-    coef: np.ndarray          # expected shape: (n_lags, n_features, n_outputs) or backend-defined
-    intercept: np.ndarray     # expected shape: (n_outputs,)
+    coef: np.ndarray
+    intercept: np.ndarray
 
     # Optional summaries for report
-    score_table_path: Optional[str]   # TSV/CSV path
-    figures: Dict[str, str]           # e.g. {"kernels": "...png", "scores": "...png"}
+    score_table_path: Optional[str]          # TSV/CSV path
+    figures: Dict[str, str]                 # e.g. {"kernel": "...png", "scores": "...png"}
     warnings: List[str]
+
 
 @dataclass(frozen=True)
 class ClinicalAnalysisNotes:
@@ -64,26 +57,14 @@ class ClinicalAnalysisBundle:
     """
     Immutable container passed from analysis to reporting.
 
-    Attributes
-    ----------
-    subject_id
-        BIDS subject identifier (e.g., "sub-001").
-    session_id
-        Optional BIDS session identifier (e.g., "ses-01").
-    run_id
-        Optional run identifier (e.g., "run-1").
-    raw_views
-        Mapping from view name to Raw object (e.g., "original", "car", "bipolar").
-    preprocessing_artifacts
-        Ordered artifacts emitted by preprocessing blocks/pipelines.
-    preprocessing_context
-        Provenance ledger + decisions (bad channels, geometry, etc.).
-    envelopes
-        Optional mapping from envelope name to Raw (e.g., {"gamma": RawArray}).
-    trf_result
-        Optional TRF result object (analysis-specific).
-    notes
-        Optional notes for reporting.
+    (docstring omitted for brevity)
+
+    Electrode table format (example)
+    -------------------------------
+    | name | x     | y     | z     | space |
+    |------|-------|-------|-------|-------|
+    | LA1  | -34.2 | -12.0 | 18.5  | MNI   |
+    | LA2  | -33.7 | -10.9 | 16.9  | MNI   |
 
     Usage example
     -------------
@@ -95,7 +76,10 @@ class ClinicalAnalysisBundle:
             preprocessing_artifacts=[],
             preprocessing_context=PreprocContext(),
             envelopes=None,
-            trf_result=None,
+            qc=None,
+            electrodes_df=None,
+            coords_space=None,
+            trf=None,
         )
     """
 
@@ -109,10 +93,22 @@ class ClinicalAnalysisBundle:
     preprocessing_context: PreprocContext
 
     envelopes: Optional[Mapping[str, mne.io.BaseRaw]] = None
-    trf_result: Optional[Any] = None
 
-    notes: ClinicalAnalysisNotes = field(default_factory=ClinicalAnalysisNotes)
     qc: Optional[ClinicalQcSummary] = None
+    notes: ClinicalAnalysisNotes = field(default_factory=ClinicalAnalysisNotes)
 
+    # -------------------------------------------------------------------------
+    # Electrodes / localization
+    # -------------------------------------------------------------------------
+    electrodes_df: Optional[pd.DataFrame] = None
+    coords_space: Optional[str] = None  # e.g. "MNI", "T1w", "patient"
+
+    # -------------------------------------------------------------------------
+    # TRF (typed, report-friendly)
+    # -------------------------------------------------------------------------
     trf: Optional[ClinicalTrfResult] = None
 
+    # -------------------------------------------------------------------------
+    # Backward-compat placeholder (optional: remove once fully migrated)
+    # -------------------------------------------------------------------------
+    trf_result: Optional[Any] = None
