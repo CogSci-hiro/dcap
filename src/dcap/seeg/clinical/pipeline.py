@@ -214,7 +214,6 @@ def _normalize_electrodes_df(
     return df, coords_space, warnings
 
 
-
 def run_clinical_analysis(
     *,
     raw: mne.io.BaseRaw,

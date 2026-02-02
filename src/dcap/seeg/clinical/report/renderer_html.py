@@ -12,6 +12,7 @@ import pandas as pd
 from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle
 from dcap.seeg.clinical.report.assets import ReportAssetDirs, relpath_for_embed, write_placeholder_png
 from dcap.seeg.clinical.report.base import ReportPaths, df_to_html_table
+from dcap.viz.electrodes import plot_electrodes_3d
 
 
 class HtmlClinicalReportRenderer:
@@ -44,9 +45,44 @@ class HtmlClinicalReportRenderer:
         qc_figs = _discover_qc_figures(out_dir)
 
         # ---------------------------------------------------------------------
-        # Placeholder figures
+        # Electrode localization figure (3D)
         # ---------------------------------------------------------------------
         fig_electrodes_3d = asset_dirs.figures_dir / "electrodes_3d.png"
+
+        electrodes_df = getattr(bundle, "electrodes_df", None)
+        coords_space = getattr(bundle, "coords_space", None)
+
+        # Optional: allow caller/pipeline to specify highlight contacts via ctx decisions
+        highlight = None
+        try:
+            decisions = bundle.preprocessing_context.decisions
+            if isinstance(decisions, dict):
+                highlight_value = decisions.get("electrodes_highlight")
+                if isinstance(highlight_value, list):
+                    highlight = [str(x) for x in highlight_value]
+        except Exception:
+            highlight = None
+
+        if electrodes_df is None or electrodes_df.empty:
+            write_placeholder_png(fig_electrodes_3d)
+        else:
+            try:
+                plot_electrodes_3d(
+                    electrodes_df=electrodes_df,
+                    out_path=fig_electrodes_3d,
+                    coords_space=coords_space,
+                    title=f"Electrode localization — {bundle.subject_id}",
+                    highlight=highlight,
+                )
+            except Exception:
+                # Never crash the report because a figure failed.
+                # We fall back to a placeholder image and continue rendering.
+                write_placeholder_png(fig_electrodes_3d)
+
+        # ---------------------------------------------------------------------
+        # Placeholder figures
+        # ---------------------------------------------------------------------
+
         fig_trf_scores_3d = asset_dirs.figures_dir / "trf_scores_3d.png"
         fig_trf_kernel = asset_dirs.figures_dir / "trf_kernel.png"
         fig_trf_scores_bar = asset_dirs.figures_dir / "trf_scores_bar.png"

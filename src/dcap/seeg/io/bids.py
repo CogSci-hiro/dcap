@@ -151,7 +151,6 @@ def _discover_runs_with_extensions(
     return dict(sorted(run_to_pref.items(), key=lambda kv: kv[0]))
 
 
-
 def load_bids_run(
     *,
     bids_root: Path,
@@ -279,7 +278,9 @@ def _load_electrodes_table_from_bids(*, bids_path: "BIDSPath") -> Optional[Mappi
     import pandas as pd
 
     recording_path = Path(str(bids_path.fpath))
-    electrodes_path = recording_path.with_name(recording_path.name.replace(recording_path.suffix, "_electrodes.tsv"))
+    electrodes_path = recording_path.with_name(
+        recording_path.stem.replace("_ieeg", "") + "_channels.tsv"
+    )
     if not electrodes_path.exists():
         return None
 
