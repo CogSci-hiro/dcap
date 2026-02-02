@@ -182,25 +182,35 @@ def plot_electrodes_3d(
             # Little too much space at the bottom
             if view.name in {"Front", "Left", "Right"}:
                 _pan_camera_down(plotter, frac=-0.05)  # tweak 0.03–0.08
+
+            keep_names = _names_for_view(all_names=names, view_name=view.name)
+            sub_montage = _subset_montage_by_names(montage=montage, keep_names=keep_names)
+
             plotter.render()
 
-            # Force one render before snapshot (helps avoid hangs)
-            plotter.render()
+            if len(keep_names) == 0:
+                ax.set_axis_off()
+                continue
 
-            # The "old script magic": image + xy in pixel coords
+            sub_montage = _subset_montage_by_names(montage=montage, keep_names=keep_names)
+
+            sub_pos = sub_montage.get_positions().get("ch_pos", {}) or {}
+            if len(sub_pos) == 0:
+                # Nothing to plot in this view (e.g., left hemi has no "'" channels)
+                ax.set_axis_off()
+                continue
+
             xy, image = mne.viz.snapshot_brain_montage(
                 brain_fig,
-                montage,
-                hide_sensors=True,  # we draw markers ourselves (for exact style match)
+                sub_montage,
+                hide_sensors=True,
             )
 
             ax.imshow(image)
 
-            # Assemble points in the same order as names
-            xy_points = np.vstack([xy[str(ch)] for ch in names if str(ch) in xy])
-
-            # If snapshot skipped some points, align values/highlights accordingly
-            plotted_names = [str(ch) for ch in names if str(ch) in xy]
+            # Use the same keep_names order for plotting
+            xy_points = np.vstack([xy[n] for n in keep_names if n in xy])
+            plotted_names = [n for n in keep_names if n in xy]
 
             if values is None:
                 ax.scatter(
@@ -417,4 +427,38 @@ def _pan_camera_down(plotter, *, frac: float) -> None:
     cam.position = tuple(pos + delta)
     cam.focal_point = tuple(foc + delta)
 
+
+def _subset_montage_by_names(*, montage, keep_names: list[str]):
+    """
+    Subset montage in a way that snapshot_brain_montage() always understands.
+
+    We rebuild from ch_pos (not dig points) because snapshot_brain_montage
+    depends on ch_pos being present.
+    """
+    import mne
+
+    pos = montage.get_positions()
+    ch_pos = pos.get("ch_pos", {}) or {}
+
+    sub_ch_pos = {name: ch_pos[name] for name in keep_names if name in ch_pos}
+
+    return mne.channels.make_dig_montage(
+        ch_pos=sub_ch_pos,
+        coord_frame="mni_tal",  # accepted by your MNE (per error message)
+    )
+
+
+
+def _names_for_view(*, all_names: np.ndarray, view_name: str) -> list[str]:
+    names = [str(n) for n in all_names]
+
+    if view_name == "Right":
+        # exclude apostrophe => right hemi
+        return [n for n in names if "'" not in n]
+
+    if view_name == "Left":
+        # include apostrophe => left hemi
+        return [n for n in names if "'" in n]
+
+    return names  # Top / Front
 
