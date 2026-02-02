@@ -301,3 +301,59 @@ def _load_electrodes_table_from_bids(*, bids_path: "BIDSPath") -> Optional[Mappi
         table[name] = (x, y, z)
 
     return table
+
+
+def resolve_canonical_electrodes_tsv(
+    *,
+    bids_path: BIDSPath,
+    bids_root: Path,
+    derivatives_name: str = "elec_recon",
+    coords_space: str = "MNI152",
+) -> Optional[Path]:
+    """
+    Resolve the canonical subject-level electrodes.tsv for a recording.
+
+    Parameters
+    ----------
+    bids_path
+        BIDSPath of the recording (run-level).
+    bids_root
+        Root of the BIDS dataset.
+    derivatives_name
+        Name of derivatives folder containing electrodes TSV.
+    coords_space
+        Coordinate space label used in the TSV filename.
+
+    Returns
+    -------
+    Optional[Path]
+        Path to electrodes TSV if it exists, else None.
+    """
+    if bids_path.subject is None:
+        return None
+
+    sub = bids_path.subject
+    ses = bids_path.session
+
+    base = (
+        bids_root
+        / "derivatives"
+        / derivatives_name
+        / f"sub-{sub}"
+    )
+
+    if ses is not None:
+        base = base / f"ses-{ses}"
+
+    fname_parts = [f"sub-{sub}"]
+    if ses is not None:
+        fname_parts.append(f"ses-{ses}")
+    fname_parts.append(f"space-{coords_space}")
+    fname_parts.append("electrodes.tsv")
+
+    electrodes_path = base / "_".join(fname_parts)
+
+    if not electrodes_path.exists():
+        return None
+
+    return electrodes_path
