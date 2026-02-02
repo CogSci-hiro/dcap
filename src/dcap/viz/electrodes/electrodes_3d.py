@@ -179,6 +179,11 @@ def plot_electrodes_3d(
                 focalpoint=brain_center,    # <-- key change
             )
 
+            # Little too much space at the bottom
+            if view.name in {"Front", "Left", "Right"}:
+                _pan_camera_down(plotter, frac=-0.05)  # tweak 0.03–0.08
+            plotter.render()
+
             # Force one render before snapshot (helps avoid hangs)
             plotter.render()
 
@@ -379,4 +384,37 @@ def _view_subset_mask(*, names: np.ndarray, view_name: str) -> np.ndarray:
     if view_name == "Left":
         return np.array(["'" in n for n in name_list], dtype=bool)
     return np.ones(len(name_list), dtype=bool)
+
+
+def _pan_camera_down(plotter, *, frac: float) -> None:
+    """
+    Pan the camera downward in screen space.
+
+    Parameters
+    ----------
+    plotter
+        PyVista Plotter instance (brain_fig.plotter).
+    frac
+        Fraction of the scene size to pan. Typical range: 0.02–0.08.
+        Positive values move content DOWN (reduce empty bottom margin).
+    """
+    cam = plotter.camera
+
+    pos = np.array(cam.position, dtype=float)
+    foc = np.array(cam.focal_point, dtype=float)
+    up = np.array(cam.up, dtype=float)
+
+    # Normalize the up vector
+    up_norm = up / (np.linalg.norm(up) + 1e-12)
+
+    # Use scene scale from bounds to convert frac -> world units
+    xmin, xmax, ymin, ymax, zmin, zmax = plotter.bounds
+    scene_scale = float(max(xmax - xmin, ymax - ymin, zmax - zmin))
+
+    # Move camera and focal point "down" (opposite of up vector)
+    delta = -frac * scene_scale * up_norm
+
+    cam.position = tuple(pos + delta)
+    cam.focal_point = tuple(foc + delta)
+
 
