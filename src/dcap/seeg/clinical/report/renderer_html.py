@@ -63,21 +63,16 @@ class HtmlClinicalReportRenderer:
         except Exception:
             highlight = None
 
-        if electrodes_df is None or electrodes_df.empty:
-            write_placeholder_png(fig_electrodes_3d)
-        else:
-            try:
-                plot_electrodes_3d(
-                    electrodes_df=electrodes_df,
-                    out_path=fig_electrodes_3d,
-                    coords_space=coords_space,
-                    title=f"Electrode localization — {bundle.subject_id}",
-                    highlight=highlight,
-                )
-            except Exception:
-                # Never crash the report because a figure failed.
-                # We fall back to a placeholder image and continue rendering.
-                write_placeholder_png(fig_electrodes_3d)
+        plot_electrodes_3d(
+            electrodes_df=electrodes_df,
+            out_path=fig_electrodes_3d,
+            coords_space=coords_space,
+            title=f"Electrode localization — {bundle.subject_id}",
+            highlight=highlight,
+        )
+        # Never crash the report because a figure failed.
+        # We fall back to a placeholder image and continue rendering.
+        # write_placeholder_png(fig_electrodes_3d)
 
         # ---------------------------------------------------------------------
         # Placeholder figures
