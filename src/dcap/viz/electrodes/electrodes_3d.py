@@ -22,7 +22,7 @@ import pandas as pd
 from dcap.viz.style import DEFAULT_STYLE, StyleConfig
 
 from .validate import validate_and_clean_electrodes_df
-from .views import VIEWS_2X2, MNEViewSpec
+from .views import VIEWS_2X2
 
 
 # =============================================================================
@@ -36,6 +36,7 @@ COLORBAR_RECT = (0.15, 0.05, 0.7, 0.02)  # (left, bottom, width, height)
 COLORBAR_ORIENTATION = "horizontal"
 
 DEFAULT_MARKER = "o"
+DEFAULT_FACE_COLOR = "#FFA500"
 DEFAULT_EDGE_COLOR = "k"
 DEFAULT_ALPHA = 1.0
 DEFAULT_CMAP = "inferno"
@@ -216,12 +217,12 @@ def plot_electrodes_3d(
                 ax.scatter(
                     xy_points[:, 0],
                     xy_points[:, 1],
-                    c="0.35",
                     s=base_size,
                     alpha=DEFAULT_ALPHA,
                     marker=marker,
+                    facecolor=DEFAULT_FACE_COLOR,
                     edgecolor=DEFAULT_EDGE_COLOR,
-                    linewidths=0.8,
+                    linewidths=0.5,
                 )
             else:
                 name_to_value = {str(n): float(v) for n, v in zip(names, values)}
@@ -236,8 +237,9 @@ def plot_electrodes_3d(
                     marker=marker,
                     cmap=cmap,
                     norm=norm,
+                    facecolor=DEFAULT_FACE_COLOR,
                     edgecolor=DEFAULT_EDGE_COLOR,
-                    linewidths=0.8,
+                    linewidths=0.5,
                 )
 
             if highlight_set:
