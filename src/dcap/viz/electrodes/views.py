@@ -3,32 +3,25 @@
 #                     #            VIEW DEFINITIONS           #
 #                     ########################################
 # =============================================================================
-"""Canonical 3D camera views for electrode localization plots."""
+"""Canonical MNE 3D camera views for electrode montage snapshots."""
 
 from dataclasses import dataclass
 from typing import Sequence
 
 
 @dataclass(frozen=True)
-class ViewSpec:
-    """Matplotlib 3D camera view specification."""
+class MNEViewSpec:
+    """MNE-compatible 3D view parameters."""
 
     name: str
-    elev_deg: float
-    azim_deg: float
+    azimuth: float
+    elevation: float
+    roll: float
 
 
-# =============================================================================
-#                     ########################################
-#                     #              DEFAULT VIEWS            #
-#                     ########################################
-# =============================================================================
-# Note: these are deterministic, fixed angles. Adjust once if you want a
-# different "clinical look", but keep them stable thereafter.
-TOP_VIEW = ViewSpec(name="Top", elev_deg=90.0, azim_deg=0.0)
-FRONT_VIEW = ViewSpec(name="Front", elev_deg=10.0, azim_deg=90.0)
-RIGHT_VIEW = ViewSpec(name="Right", elev_deg=10.0, azim_deg=0.0)
-LEFT_VIEW = ViewSpec(name="Left", elev_deg=10.0, azim_deg=180.0)
+TOP_VIEW = MNEViewSpec(name="Top", azimuth=0.0, elevation=0.0, roll=0.0)
+FRONT_VIEW = MNEViewSpec(name="Front", azimuth=90.0, elevation=90.0, roll=2.0)  # matches your ref
+RIGHT_VIEW = MNEViewSpec(name="Right", azimuth=0.0, elevation=90.0, roll=-90.0)
+LEFT_VIEW = MNEViewSpec(name="Left", azimuth=0.0, elevation=-90.0, roll=90.0)
 
-
-VIEWS_2X2: Sequence[ViewSpec] = (TOP_VIEW, FRONT_VIEW, RIGHT_VIEW, LEFT_VIEW)
+VIEWS_2X2: Sequence[MNEViewSpec] = (TOP_VIEW, FRONT_VIEW, RIGHT_VIEW, LEFT_VIEW)
