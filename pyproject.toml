@@ -17,7 +17,10 @@ dependencies = [
   "numpy>=1.24",
   "pandas>=2.0",
   "pydab",
+  "PyQt5",
   "pytest",
+  "pyvistaqt",
+  "ipywidgets",
   "pyyaml",
   "soundfile"
 ]
