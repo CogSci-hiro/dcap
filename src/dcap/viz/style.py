@@ -3,8 +3,6 @@
 # =============================================================================
 """Centralized styling defaults for all DCAP visualizations."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 
