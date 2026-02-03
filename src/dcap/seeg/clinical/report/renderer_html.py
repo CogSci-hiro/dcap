@@ -118,14 +118,14 @@ class HtmlClinicalReportRenderer:
                     title=f"TRF scores (r) — {bundle.subject_id}",
                     color_values=color_values,
                     size_values=size_values,
-                    vmin=vmin,
+                    vmin=None,
                     vmax=vmax,
                     threshold=MANUAL_TRF_SCORE_THRESHOLD,
                     threshold_mode="ge",
                     threshold_on="size",  # threshold on |r| (magnitude)
                     annotate=False,
                 )
-            except Exception:
+            except Exception:  # noqa
                 write_placeholder_png(fig_trf_scores_3d)
 
         # ---------------------------------------------------------------------

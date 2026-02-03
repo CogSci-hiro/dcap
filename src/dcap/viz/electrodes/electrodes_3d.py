@@ -249,6 +249,7 @@ def plot_electrodes_3d(
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
+        threshold=threshold,
     )
 
     # -------------------------------------------------------------------------
@@ -580,11 +581,19 @@ def _prepare_color_mapping(
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
+    threshold: Optional[float],
 ) -> tuple[Optional[mpl.colors.Normalize], Optional[mpl.cm.ScalarMappable]]:
     """
     Build (norm, scalar_mappable) for color mapping if color_values is provided.
 
-    Returns (None, None) when color_values is None or contains no finite values.
+    Behavior
+    --------
+    - If vmin/vmax are explicitly provided, they win.
+    - Else if threshold is provided:
+        * colorbar min is set to threshold (NOT the data min)
+        * colorbar max is set to max(color_values)
+      This matches the clinical view where sub-threshold electrodes are not shown.
+    - Else: fall back to data min/max.
     """
     if color_values is None:
         return None, None
@@ -593,8 +602,22 @@ def _prepare_color_mapping(
     if not np.any(finite):
         return None, None
 
-    vvmin = float(np.nanmin(color_values[finite])) if vmin is None else float(vmin)
-    vvmax = float(np.nanmax(color_values[finite])) if vmax is None else float(vmax)
+    data_min = float(np.nanmin(color_values[finite]))
+    data_max = float(np.nanmax(color_values[finite]))
+
+    if vmin is not None:
+        vvmin = float(vmin)
+    elif threshold is not None:
+        vvmin = float(threshold)
+    else:
+        vvmin = data_min
+
+    vvmax = float(vmax) if vmax is not None else data_max
+
+    # Guard against degenerate normalization (vmin >= vmax)
+    if not np.isfinite(vvmin) or not np.isfinite(vvmax) or vvmin >= vvmax:
+        vvmin = data_min
+        vvmax = data_max
 
     norm = mpl.colors.Normalize(vmin=vvmin, vmax=vvmax)
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=mpl.cm.get_cmap(cmap))
