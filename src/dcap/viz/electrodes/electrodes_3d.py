@@ -153,6 +153,21 @@ def plot_electrodes_3d(
     size_arr = _as_aligned_float_array(values=size_values, expected_len=len(cleaned_df), name="size_values")
 
     # -------------------------------------------------------------------------
+    # Build a montage/info from ALL electrodes (pre-threshold).
+    # This stabilizes the brain underlay and view projection across calls.
+    # Thresholding should only change markers, not the 3D scene.
+    # -------------------------------------------------------------------------
+    ch_pos_all = {str(name): xyz_m[i, :] for i, name in enumerate(names)}
+    montage_all = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos_all)
+
+    info_all = mne.create_info(
+        ch_names=[str(n) for n in names],
+        sfreq=1000.0,
+        ch_types=["seeg"] * len(names),
+    )
+    info_all.set_montage(montage_all)
+
+    # -------------------------------------------------------------------------
     # Apply optional thresholding.
     #
     # Threshold source selection:
@@ -186,7 +201,7 @@ def plot_electrodes_3d(
     # - We build montage only from kept electrodes so snapshots don’t try to
     #   project electrodes we’ll never plot.
     # -------------------------------------------------------------------------
-    ch_pos = {str(name): xyz_m_kept[i, :] for i, name in enumerate(names_kept)}
+    '''ch_pos = {str(name): xyz_m_kept[i, :] for i, name in enumerate(names_kept)}
     montage = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos)
 
     info = mne.create_info(
@@ -194,14 +209,14 @@ def plot_electrodes_3d(
         sfreq=1000.0,
         ch_types=["seeg"] * len(names_kept),
     )
-    info.set_montage(montage)
+    info.set_montage(montage)'''
 
     # -------------------------------------------------------------------------
     # Create fsaverage underlay using plot_alignment.
     # -------------------------------------------------------------------------
     subjects_dir = _get_fsaverage_subjects_dir(mne)
     brain_fig = mne.viz.plot_alignment(
-        info,
+        info_all,
         trans="fsaverage",
         subject="fsaverage",
         coord_frame="mri",
@@ -257,6 +272,21 @@ def plot_electrodes_3d(
             # -----------------------------------------------------------------
             # Configure camera for this view.
             # -----------------------------------------------------------------
+            focalpoint = brain_center.copy()
+
+            # This matches your old "pan down" intent but avoids mutating camera state.
+            if view.name in {"Front", "Left", "Right"}:
+                # Pan along the plot's "up" direction in world coords.
+                # Use bounds to get a stable scale.
+                xmin, xmax, ymin, ymax, zmin, zmax = plotter.bounds
+                scene_scale = float(max(xmax - xmin, ymax - ymin, zmax - zmin))
+
+                # Nudge focalpoint down in Z (world) as a stable approximation.
+                # If your coordinate frame differs, we can switch this to the camera up-vector.
+                focalpoint[2] -= 0.05 * scene_scale
+
+            _reset_camera_orientation(plotter)
+
             mne.viz.set_3d_view(
                 figure=brain_fig,
                 azimuth=view.azimuth,
@@ -265,10 +295,6 @@ def plot_electrodes_3d(
                 distance=camera_distance,
                 focalpoint=brain_center,
             )
-
-            # This is your empirical tweak to reduce bottom padding in 3 views.
-            if view.name in {"Front", "Left", "Right"}:
-                _pan_camera_down(plotter, frac=-0.05)
 
             # -----------------------------------------------------------------
             # Per-view hemisphere filtering (existing behavior):
@@ -285,7 +311,7 @@ def plot_electrodes_3d(
                 continue
 
             # Subset montage to just the channels used in this view.
-            sub_montage = _subset_montage_by_names(montage=montage, keep_names=keep_names)
+            sub_montage = _subset_montage_by_names(montage=montage_all, keep_names=keep_names)
             sub_pos = sub_montage.get_positions().get("ch_pos", {}) or {}
             if len(sub_pos) == 0:
                 ax.set_axis_off()
@@ -793,3 +819,29 @@ def _add_colorbar(*, fig, scalar_mappable, title: str, font_size: int) -> None:
     cbar = fig.colorbar(scalar_mappable, cax=cax, orientation=COLORBAR_ORIENTATION)
     cbar.ax.tick_params(labelsize=max(8, font_size))
     cax.set_title(title, fontsize=max(9, font_size))
+
+
+def _reset_camera_orientation(plotter) -> None:
+    """
+    Reset camera orientation to avoid unintended rotation (VTK view-up drift).
+
+    We do this before mne.viz.set_3d_view so that azimuth/elevation/roll land
+    on a consistent baseline each time.
+    """
+    cam = plotter.camera
+
+    # Force a canonical "up" direction in world coordinates.
+    # For fsaverage/mri frame this is typically +Z.
+    try:
+        cam.up = (0.0, 0.0, 1.0)
+    except Exception:
+        pass
+
+    # Remove any accumulated roll.
+    try:
+        # VTK-style: roll is relative; setting to 0 isn't always supported directly,
+        # but many wrappers expose cam.roll as a property.
+        cam.roll = 0.0
+    except Exception:
+        pass
+
