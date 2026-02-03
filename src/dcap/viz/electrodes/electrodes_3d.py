@@ -5,25 +5,23 @@
 # =============================================================================
 """Static 3D electrode localization plot with fsaverage underlay (MNE snapshot + 2D marker overlay)."""
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Literal, Optional, Sequence
 
 import matplotlib
 
 matplotlib.use("Agg", force=True)
 
-import matplotlib as mpl
-from matplotlib import pyplot as plt
-import numpy as np
-import pandas as pd
+import matplotlib as mpl  # noqa
+from matplotlib import pyplot as plt  # noqa
+import numpy as np  # noqa
+import pandas as pd  # noqa
 
-from dcap.viz.style import DEFAULT_STYLE, StyleConfig
+from dcap.viz.style import DEFAULT_STYLE, StyleConfig  # noqa
 
-from .validate import validate_and_clean_electrodes_df
-from .views import VIEWS_2X2
+from .validate import validate_and_clean_electrodes_df  # noqa
+from .views import VIEWS_2X2  # noqa
 
 
 # =============================================================================
@@ -44,6 +42,9 @@ DEFAULT_CMAP = "inferno"
 
 VTK_WINDOW_SIZE_PX = (800, 800)
 
+# Threshold behavior
+ThresholdMode = Literal["ge", "gt", "le", "lt"]
+
 
 def plot_electrodes_3d(
     *,
@@ -54,10 +55,16 @@ def plot_electrodes_3d(
     highlight: Optional[Sequence[str]] = None,
     figsize: tuple[float, float] = (6.0, 6.0),
     dpi: int = 150,
-    values_col: Optional[str] = None,
+    color_values: Optional[Sequence[float]] = None,
+    size_values: Optional[Sequence[float]] = None,
     cmap: str = DEFAULT_CMAP,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
+    size_min: Optional[float] = None,
+    size_max: Optional[float] = None,
+    threshold: Optional[float] = None,
+    threshold_mode: ThresholdMode = "ge",
+    threshold_on: Literal["auto", "color", "size"] = "auto",
     marker: str = DEFAULT_MARKER,
     base_size: float = 20.0,
     highlight_size: float = 280.0,
@@ -67,10 +74,34 @@ def plot_electrodes_3d(
     """
     Plot 3D electrode locations on an fsaverage brain outline and save a 2×2 PNG.
 
-    This uses MNE's snapshot_brain_montage() (like your reference) to obtain:
-    - the brain underlay image
-    - pixel-space xy locations for sensors
-    Then overlays 2D Matplotlib markers to match your original look.
+    How it works (same as before, but with value sequences):
+    --------------------------------------------------------
+    1) Use MNE's snapshot_brain_montage() to get:
+       - the brain underlay image (per view)
+       - pixel-space xy locations for the electrodes (per view)
+
+    2) Overlay 2D Matplotlib scatter markers on top of the underlay to control:
+       - face color / edge color / size / highlighting / optional annotation
+
+    New features:
+    -------------
+    - Accept sequences to control marker color and/or size:
+        * color_values -> colormap-driven face colors (+ colorbar)
+        * size_values  -> per-electrode scatter sizes (normalized scaling)
+
+    - Optional thresholding:
+        * if threshold is provided, we keep only electrodes whose values satisfy
+          the threshold rule. Thresholding is applied BEFORE plotting and affects
+          all views consistently.
+
+    Input alignment contract (important):
+    -------------------------------------
+    - color_values and size_values must align with the cleaned electrode table
+      after validate_and_clean_electrodes_df() (i.e., the same row order).
+    - In practice: easiest is to compute the sequences from columns in the same
+      electrodes_df you pass in (before calling this function), and pass them in
+      the same order. If you pass sequences that came from a different filtered/
+      permuted table, you will get mismatches.
     """
     import mne  # noqa: WPS433
 
@@ -83,18 +114,23 @@ def plot_electrodes_3d(
     mne.viz.set_3d_backend("pyvistaqt")
 
     # -------------------------------------------------------------------------
-    # Validate / clean input.
+    # Validate / clean input DataFrame.
+    # - This function enforces the "canonical" electrode format and drops NaNs.
+    # - IMPORTANT: any value sequences passed to this function must align with
+    #   the cleaned_df order after this call.
     # -------------------------------------------------------------------------
-    cleaned_df = validate_and_clean_electrodes_df(electrodes_df, values_col=values_col)
+    cleaned_df = validate_and_clean_electrodes_df(electrodes_df, values_col=None)
     if cleaned_df.empty:
         raise ValueError("electrodes_df is empty after cleaning.")
 
     # -------------------------------------------------------------------------
     # Units: auto-detect mm vs m to avoid double scaling.
+    # - If the max absolute coordinate is < 1, assume meters.
+    # - Otherwise assume millimeters and convert to meters.
     # -------------------------------------------------------------------------
     xyz = cleaned_df[["x", "y", "z"]].to_numpy(dtype=float)
     abs_max = float(np.nanmax(np.abs(xyz)))
-    xyz_m = xyz if abs_max < 1.0 else xyz * 1e-3  # meters if already < 1 m
+    xyz_m = xyz if abs_max < 1.0 else xyz * 1e-3
 
     names = cleaned_df["name"].astype(str).to_numpy()
     highlight_set = set(highlight or [])
@@ -104,15 +140,52 @@ def plot_electrodes_3d(
     effective_dpi = int(dpi) if dpi is not None else int(style.dpi)
 
     # -------------------------------------------------------------------------
-    # Montage: MNI Talairach compat (matches your reference get_montage).
+    # Convert optional sequences into NumPy arrays (or None), validate lengths.
     # -------------------------------------------------------------------------
-    ch_pos = {str(name): xyz_m[i, :] for i, name in enumerate(names)}
+    color_arr = _as_aligned_float_array(values=color_values, expected_len=len(cleaned_df), name="color_values")
+    size_arr = _as_aligned_float_array(values=size_values, expected_len=len(cleaned_df), name="size_values")
+
+    # -------------------------------------------------------------------------
+    # Apply optional thresholding.
+    #
+    # Threshold source selection:
+    # - "auto": prefer color_values if present, else size_values.
+    # - "color": require color_values.
+    # - "size": require size_values.
+    #
+    # If threshold is None, we keep everything (existing behavior).
+    # -------------------------------------------------------------------------
+    keep_mask = _compute_threshold_mask(
+        n_electrodes=len(cleaned_df),
+        color_values=color_arr,
+        size_values=size_arr,
+        threshold=threshold,
+        threshold_mode=threshold_mode,
+        threshold_on=threshold_on,
+    )
+
+    # If thresholding removed everything, fail fast (better than blank montage).
+    if not np.any(keep_mask):
+        raise ValueError("Thresholding removed all electrodes; nothing to plot.")
+
+    # Apply keep_mask consistently to names/xyz and to optional sequences.
+    names_kept = names[keep_mask]
+    xyz_m_kept = xyz_m[keep_mask]
+    color_kept = color_arr[keep_mask] if color_arr is not None else None
+    size_kept = size_arr[keep_mask] if size_arr is not None else None
+
+    # -------------------------------------------------------------------------
+    # Montage: MNI Talairach compat (matches your reference get_montage).
+    # - We build montage only from kept electrodes so snapshots don’t try to
+    #   project electrodes we’ll never plot.
+    # -------------------------------------------------------------------------
+    ch_pos = {str(name): xyz_m_kept[i, :] for i, name in enumerate(names_kept)}
     montage = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos)
 
     info = mne.create_info(
-        ch_names=list(names),
+        ch_names=list(names_kept),
         sfreq=1000.0,
-        ch_types=["seeg"] * len(names),
+        ch_types=["seeg"] * len(names_kept),
     )
     info.set_montage(montage)
 
@@ -145,50 +218,84 @@ def plot_electrodes_3d(
     fig2.patch.set_facecolor("white")
     fig2.suptitle(plot_title, fontsize=max(12, style.font_size + 2))
 
-    values, norm, scalar_mappable = _prepare_values(
-        cleaned_df=cleaned_df,
-        values_col=values_col,
+    # -------------------------------------------------------------------------
+    # Color mapping setup (only if color_values is provided).
+    # - This mirrors your previous values_col flow, but now uses a sequence.
+    # -------------------------------------------------------------------------
+    color_norm, color_scalar_mappable = _prepare_color_mapping(
+        color_values=color_kept,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
     )
 
-    # Precompute once (used for camera distance).
-    _, global_extent_m = _compute_scene_center_and_extent(xyz_m=xyz_m)
+    # -------------------------------------------------------------------------
+    # Size mapping setup (only if size_values is provided).
+    # - We map the provided values to a reasonable marker-size range.
+    # - base_size is treated as the "minimum / baseline" size.
+    #
+    # If size_values is None, we plot with constant base_size.
+    # -------------------------------------------------------------------------
+    sizes_px = _prepare_size_mapping(
+        size_values=size_kept,
+        base_size=base_size,
+        size_min=size_min,
+        size_max=size_max,
+    )
+
+    # -------------------------------------------------------------------------
+    # Camera distance is stabilized based on the kept electrode geometry.
+    # -------------------------------------------------------------------------
+    _, global_extent_m = _compute_scene_center_and_extent(xyz_m=xyz_m_kept)
     camera_distance = float(6.0 * global_extent_m)
 
     try:
         for i, view in enumerate(VIEWS_2X2):
             ax = axes[i // 2, i % 2]
 
+            # -----------------------------------------------------------------
             # Configure camera for this view.
+            # -----------------------------------------------------------------
             mne.viz.set_3d_view(
                 figure=brain_fig,
                 azimuth=view.azimuth,
                 elevation=view.elevation,
                 roll=view.roll,
-                distance=camera_distance,  # <-- key change: no "auto"
-                focalpoint=brain_center,  # <-- key change
+                distance=camera_distance,
+                focalpoint=brain_center,
             )
 
-            # Little too much space at the bottom.
+            # This is your empirical tweak to reduce bottom padding in 3 views.
             if view.name in {"Front", "Left", "Right"}:
-                _pan_camera_down(plotter, frac=-0.05)  # tweak 0.03–0.08
+                _pan_camera_down(plotter, frac=-0.05)
 
-            keep_names = _names_for_view(all_names=names, view_name=view.name)
+            # -----------------------------------------------------------------
+            # Per-view hemisphere filtering (existing behavior):
+            # - Right view shows only channels without "'"
+            # - Left view shows only channels with "'"
+            # - Top/Front show all
+            #
+            # NOTE: this is applied AFTER thresholding (so thresholded-out channels
+            # never appear anywhere).
+            # -----------------------------------------------------------------
+            keep_names = _names_for_view(all_names=names_kept, view_name=view.name)
             if len(keep_names) == 0:
                 ax.set_axis_off()
                 continue
 
+            # Subset montage to just the channels used in this view.
             sub_montage = _subset_montage_by_names(montage=montage, keep_names=keep_names)
             sub_pos = sub_montage.get_positions().get("ch_pos", {}) or {}
             if len(sub_pos) == 0:
-                # Nothing to plot in this view (e.g., left hemi has no "'" channels).
                 ax.set_axis_off()
                 continue
 
+            # Render once (important for screenshot stability).
             plotter.render()
 
+            # Snapshot provides:
+            # - image: the brain underlay raster
+            # - xy: mapping from channel name -> pixel coordinate in that image
             xy, image = mne.viz.snapshot_brain_montage(
                 brain_fig,
                 sub_montage,
@@ -196,30 +303,56 @@ def plot_electrodes_3d(
             )
             ax.imshow(image)
 
-            xy_points = np.vstack([xy[n] for n in keep_names if n in xy])
+            # -----------------------------------------------------------------
+            # Build plotting arrays in the same order as keep_names.
+            # Some names may not be present in xy (rare but possible); filter them.
+            # -----------------------------------------------------------------
             plotted_names = [n for n in keep_names if n in xy]
+            if len(plotted_names) == 0:
+                ax.set_axis_off()
+                continue
 
-            if values is None:
+            xy_points = np.vstack([xy[n] for n in plotted_names])
+
+            # Align optional values to the plotted subset, by name.
+            # We use the kept-name order as our canonical index.
+            name_to_index = {n: idx for idx, n in enumerate(names_kept.tolist())}
+
+            plotted_color = None
+            if color_kept is not None:
+                plotted_color = np.array([color_kept[name_to_index[n]] for n in plotted_names], dtype=float)
+
+            plotted_sizes = None
+            if sizes_px is not None:
+                plotted_sizes = np.array([sizes_px[name_to_index[n]] for n in plotted_names], dtype=float)
+
+            # -----------------------------------------------------------------
+            # Scatter overlay:
+            # - If color_values provided -> colormap face colors + edge outline
+            # - Else -> static face color + edge outline
+            # - If size_values provided -> per-point sizes, else constant base_size
+            # -----------------------------------------------------------------
+            if plotted_color is None:
                 _scatter_static_markers(
                     ax=ax,
                     xy_points=xy_points,
                     marker=marker,
-                    size=base_size,
+                    sizes=plotted_sizes,
+                    default_size=base_size,
                 )
             else:
-                name_to_value = {str(n): float(v) for n, v in zip(names, values)}
-                sel_values = np.array([name_to_value[n] for n in plotted_names], dtype=float)
-
                 _scatter_value_markers(
                     ax=ax,
                     xy_points=xy_points,
-                    values=sel_values,
+                    values=plotted_color,
                     marker=marker,
-                    size=base_size,
+                    sizes=plotted_sizes,
+                    default_size=base_size,
                     cmap=cmap,
-                    norm=norm,
+                    norm=color_norm,
                 )
 
+            # Highlight ring overlay (unchanged behavior).
             _scatter_highlights(
                 ax=ax,
                 xy_points=xy_points,
@@ -228,13 +361,20 @@ def plot_electrodes_3d(
                 highlight_size=highlight_size,
             )
 
+            # Optional text annotation overlay.
             if annotate:
                 _annotate_points(ax=ax, xy_points=xy_points, names=plotted_names, font_size=style.font_size)
 
             ax.set_axis_off()
 
-        if scalar_mappable is not None and values_col is not None:
-            _add_colorbar(fig=fig2, scalar_mappable=scalar_mappable, title=values_col, font_size=style.font_size)
+        # Add colorbar only when we have a color scalar mappable.
+        if color_scalar_mappable is not None:
+            _add_colorbar(
+                fig=fig2,
+                scalar_mappable=color_scalar_mappable,
+                title="values",
+                font_size=style.font_size,
+            )
 
         fig2.tight_layout()
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +390,7 @@ def plot_electrodes_3d(
 #                     ########################################
 # =============================================================================
 def _configure_matplotlib(*, style: StyleConfig, dpi: int) -> None:
+    """Apply global Matplotlib defaults for a deterministic, clinical-safe figure."""
     mpl.rcParams.update(
         {
             "figure.dpi": int(dpi),
@@ -260,10 +401,12 @@ def _configure_matplotlib(*, style: StyleConfig, dpi: int) -> None:
 
 
 def _default_title(*, coords_label: Optional[str]) -> str:
+    """Default title builder."""
     return f"Electrode localization ({coords_label})" if coords_label else "Electrode localization"
 
 
 def _get_fsaverage_subjects_dir(mne_module) -> Path:
+    """Resolve an fsaverage subjects_dir in a version-compatible way."""
     fetch = getattr(mne_module.datasets, "fetch_fsaverage", None)
     if callable(fetch):
         fs_dir = Path(fetch(verbose=False))
@@ -273,29 +416,122 @@ def _get_fsaverage_subjects_dir(mne_module) -> Path:
 
 
 def _harden_plotter(plotter) -> None:
-    # Your proven anti-hang levers.
+    """
+    Anti-hang hardening for PyVistaQt in IDE contexts.
+
+    These are the levers you discovered empirically:
+    - remove the interactor (prevents event loop / GUI takeover)
+    - constrain window size (reduces memory/VRAM usage and makes screenshots stable)
+    """
     try:
         plotter.iren = None
-    except Exception:
+    except Exception:  # noqa
         pass
     try:
         plotter.window_size = VTK_WINDOW_SIZE_PX
-    except Exception:
+    except Exception:  # noqa
         pass
+
+
+def _as_aligned_float_array(*, values: Optional[Sequence[float]], expected_len: int, name: str) -> Optional[np.ndarray]:
+    """
+    Convert an optional sequence to a float array and validate length.
+
+    Parameters
+    ----------
+    values
+        Optional sequence of numeric values.
+    expected_len
+        Expected number of values (must match len(cleaned_df)).
+    name
+        Name for error messages.
+
+    Returns
+    -------
+    Optional[np.ndarray]
+        None if values is None, otherwise float array.
+    """
+    if values is None:
+        return None
+
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be a 1D sequence, got shape {arr.shape}.")
+    if arr.shape[0] != expected_len:
+        raise ValueError(f"{name} length mismatch: expected {expected_len}, got {arr.shape[0]}.")
+    return arr
+
+
+def _compute_threshold_mask(
+    *,
+    n_electrodes: int,
+    color_values: Optional[np.ndarray],
+    size_values: Optional[np.ndarray],
+    threshold: Optional[float],
+    threshold_mode: ThresholdMode,
+    threshold_on: Literal["auto", "color", "size"],
+) -> np.ndarray:
+    """
+    Build a boolean mask selecting electrodes to keep based on optional thresholding.
+
+    If threshold is None, returns an all-True mask of length n_electrodes.
+    """
+    if threshold is None:
+        # No thresholding => keep everything (plain electrode plotting mode).
+        return np.ones(int(n_electrodes), dtype=bool)
+
+    if threshold_on == "color":
+        if color_values is None:
+            raise ValueError("threshold_on='color' requires color_values.")
+        ref = color_values
+    elif threshold_on == "size":
+        if size_values is None:
+            raise ValueError("threshold_on='size' requires size_values.")
+        ref = size_values
+    else:
+        # auto
+        if color_values is not None:
+            ref = color_values
+        elif size_values is not None:
+            ref = size_values
+        else:
+            raise ValueError("threshold provided, but neither color_values nor size_values were provided.")
+
+    finite = np.isfinite(ref)
+    mask = np.zeros(ref.shape[0], dtype=bool)
+
+    thr = float(threshold)
+
+    if threshold_mode == "ge":
+        mask[finite] = ref[finite] >= thr
+    elif threshold_mode == "gt":
+        mask[finite] = ref[finite] > thr
+    elif threshold_mode == "le":
+        mask[finite] = ref[finite] <= thr
+    elif threshold_mode == "lt":
+        mask[finite] = ref[finite] < thr
+    else:
+        raise ValueError(f"Unknown threshold_mode: {threshold_mode}")
+
+    return mask
+
 
 
 def _make_dig_montage_mni_tal_compat(*, ch_pos_m: dict[str, np.ndarray]):
+    """
+    Create an MNI-Tal montage in a way that works across MNE builds.
+
+    We try the public API first; if rejected, we fall back to constructing DigPoints.
+    """
     import mne
 
-    # Try the nice path.
     try:
         return mne.channels.make_dig_montage(ch_pos=ch_pos_m, coord_frame="mni_tal")
-    except Exception:
+    except Exception:  # noqa
         pass
 
-    # Compat path for MNE builds that reject the string.
-    from mne._fiff.constants import FIFF
-    from mne._fiff._digitization import DigPoint
+    from mne._fiff.constants import FIFF  # noqa
+    from mne._fiff._digitization import DigPoint  # noqa
     from mne.channels import DigMontage
 
     dig = []
@@ -312,29 +548,72 @@ def _make_dig_montage_mni_tal_compat(*, ch_pos_m: dict[str, np.ndarray]):
     return DigMontage(dig=dig, ch_names=list(ch_pos_m.keys()))
 
 
-def _prepare_values(
+def _prepare_color_mapping(
     *,
-    cleaned_df: pd.DataFrame,
-    values_col: Optional[str],
+    color_values: Optional[np.ndarray],
     cmap: str,
     vmin: Optional[float],
     vmax: Optional[float],
-) -> Tuple[Optional[np.ndarray], Optional[mpl.colors.Normalize], Optional[mpl.cm.ScalarMappable]]:
-    if values_col is None:
-        return None, None, None
+) -> tuple[Optional[mpl.colors.Normalize], Optional[mpl.cm.ScalarMappable]]:
+    """
+    Build (norm, scalar_mappable) for color mapping if color_values is provided.
 
-    values = pd.to_numeric(cleaned_df[values_col], errors="coerce").to_numpy(dtype=float)
-    finite = np.isfinite(values)
+    Returns (None, None) when color_values is None or contains no finite values.
+    """
+    if color_values is None:
+        return None, None
+
+    finite = np.isfinite(color_values)
     if not np.any(finite):
-        return None, None, None
+        return None, None
 
-    vvmin = float(np.nanmin(values[finite])) if vmin is None else float(vmin)
-    vvmax = float(np.nanmax(values[finite])) if vmax is None else float(vmax)
+    vvmin = float(np.nanmin(color_values[finite])) if vmin is None else float(vmin)
+    vvmax = float(np.nanmax(color_values[finite])) if vmax is None else float(vmax)
 
     norm = mpl.colors.Normalize(vmin=vvmin, vmax=vvmax)
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=mpl.cm.get_cmap(cmap))
-    sm.set_array(values[finite])
-    return values, norm, sm
+    sm.set_array(color_values[finite])
+    return norm, sm
+
+
+def _prepare_size_mapping(
+    *,
+    size_values: Optional[np.ndarray],
+    base_size: float,
+    size_min: Optional[float],
+    size_max: Optional[float],
+) -> Optional[np.ndarray]:
+    """
+    Convert size_values to a per-point marker size array (in Matplotlib "points^2").
+
+    Behavior:
+    - If size_values is None -> return None (caller uses base_size everywhere).
+    - Else: normalize size_values to [0, 1] using finite subset, then map to a
+      size range:
+        [size_min, size_max] if provided, else [base_size, 6*base_size].
+
+    Non-finite size values default to base_size (safe and deterministic).
+    """
+    if size_values is None:
+        return None
+
+    finite = np.isfinite(size_values)
+    if not np.any(finite):
+        return None
+
+    vmin = float(np.nanmin(size_values[finite]))
+    vmax = float(np.nanmax(size_values[finite]))
+    denom = (vmax - vmin) if vmax > vmin else 1.0
+
+    normalized = np.zeros_like(size_values, dtype=float)
+    normalized[finite] = (size_values[finite] - vmin) / denom
+    normalized[~finite] = 0.0
+
+    out_min = float(size_min) if size_min is not None else float(base_size)
+    out_max = float(size_max) if size_max is not None else float(6.0 * base_size)
+
+    sizes = out_min + normalized * (out_max - out_min)
+    return sizes
 
 
 def _compute_scene_center_and_extent(*, xyz_m: np.ndarray) -> tuple[np.ndarray, float]:
@@ -373,14 +652,11 @@ def _pan_camera_down(plotter, *, frac: float) -> None:
     foc = np.array(cam.focal_point, dtype=float)
     up = np.array(cam.up, dtype=float)
 
-    # Normalize the up vector.
     up_norm = up / (np.linalg.norm(up) + 1e-12)
 
-    # Use scene scale from bounds to convert frac -> world units.
     xmin, xmax, ymin, ymax, zmin, zmax = plotter.bounds
     scene_scale = float(max(xmax - xmin, ymax - ymin, zmax - zmin))
 
-    # Move camera and focal point "down" (opposite of up vector).
     delta = -frac * scene_scale * up_norm
 
     cam.position = tuple(pos + delta)
@@ -391,31 +667,29 @@ def _subset_montage_by_names(*, montage, keep_names: list[str]):
     """
     Subset montage in a way that snapshot_brain_montage() always understands.
 
-    We rebuild from ch_pos (not dig points) because snapshot_brain_montage
-    depends on ch_pos being present.
+    We rebuild from ch_pos (not dig points) because snapshot_brain_montage depends on
+    ch_pos being present.
     """
     import mne
 
     pos = montage.get_positions()
     ch_pos = pos.get("ch_pos", {}) or {}
-
     sub_ch_pos = {name: ch_pos[name] for name in keep_names if name in ch_pos}
 
     return mne.channels.make_dig_montage(
         ch_pos=sub_ch_pos,
-        coord_frame="mni_tal",  # accepted by your MNE (per error message).
+        coord_frame="mni_tal",
     )
 
 
 def _names_for_view(*, all_names: np.ndarray, view_name: str) -> list[str]:
+    """Hemisphere filtering heuristic based on apostrophe in names (existing behavior)."""
     names = [str(n) for n in all_names]
 
     if view_name == "Right":
-        # exclude apostrophe => right hemi.
         return [n for n in names if "'" not in n]
 
     if view_name == "Left":
-        # include apostrophe => left hemi.
         return [n for n in names if "'" in n]
 
     return names  # Top / Front
@@ -426,12 +700,20 @@ def _scatter_static_markers(
     ax,
     xy_points: np.ndarray,
     marker: str,
-    size: float,
+    sizes: Optional[np.ndarray],
+    default_size: float,
 ) -> None:
+    """
+    Scatter markers with a constant face color.
+
+    If sizes is provided, it must align with xy_points (same length). Otherwise
+    we use default_size for all points.
+    """
+    s = sizes if sizes is not None else float(default_size)
     ax.scatter(
         xy_points[:, 0],
         xy_points[:, 1],
-        s=size,
+        s=s,
         alpha=DEFAULT_ALPHA,
         marker=marker,
         facecolors=DEFAULT_FACE_COLOR,
@@ -446,15 +728,23 @@ def _scatter_value_markers(
     xy_points: np.ndarray,
     values: np.ndarray,
     marker: str,
-    size: float,
+    sizes: Optional[np.ndarray],
+    default_size: float,
     cmap: str,
     norm: Optional[mpl.colors.Normalize],
 ) -> None:
+    """
+    Scatter markers whose face colors come from a value array + colormap.
+
+    If sizes is provided, it must align with xy_points (same length). Otherwise
+    we use default_size for all points.
+    """
+    s = sizes if sizes is not None else float(default_size)
     ax.scatter(
         xy_points[:, 0],
         xy_points[:, 1],
         c=values,
-        s=size,
+        s=s,
         alpha=DEFAULT_ALPHA,
         marker=marker,
         cmap=cmap,
@@ -472,6 +762,7 @@ def _scatter_highlights(
     highlight_set: set[str],
     highlight_size: float,
 ) -> None:
+    """Draw a ring overlay around highlighted electrodes (existing behavior)."""
     if not highlight_set:
         return
 
@@ -491,12 +782,14 @@ def _scatter_highlights(
 
 
 def _annotate_points(*, ax, xy_points: np.ndarray, names: list[str], font_size: int) -> None:
+    """Add small text labels next to points (optional)."""
     for (xpix, ypix), n in zip(xy_points, names):
         ax.text(xpix, ypix, n, fontsize=max(6, font_size - 2))
 
 
 def _add_colorbar(*, fig, scalar_mappable, title: str, font_size: int) -> None:
-    cax = fig.add_axes(COLORBAR_RECT)  # noqa: WPS437
+    """Attach a horizontal colorbar (matching your original layout)."""
+    cax = fig.add_axes(COLORBAR_RECT)
     cbar = fig.colorbar(scalar_mappable, cax=cax, orientation=COLORBAR_ORIENTATION)
     cbar.ax.tick_params(labelsize=max(8, font_size))
     cax.set_title(title, fontsize=max(9, font_size))
