@@ -261,14 +261,12 @@ def _write_fallback_error_report(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "clinical_report_ERROR.md"
 
-    lines: List[str] = []
-    lines.append(f"# Clinical report failed to render\n")
-    lines.append(f"- subject_id: `{subject_id}`\n")
-    lines.append(f"- session_id: `{session_id}`\n")
-    lines.append(f"- runs: `{list(run_ids)}`\n")
-    lines.append(f"- requested_format: `{report_format}`\n\n")
-
-    lines.append("## Errors\n\n")
+    lines: List[str] = [f"# Clinical report failed to render\n",
+                        f"- subject_id: `{subject_id}`\n",
+                        f"- session_id: `{session_id}`\n",
+                        f"- runs: `{list(run_ids)}`\n",
+                        f"- requested_format: `{report_format}`\n\n",
+                        "## Errors\n\n"]
 
     # We don't know the exact ErrorLog API, but typical is `.records` being a list.
     # If your ErrorLog uses a different attribute, tweak here once.
