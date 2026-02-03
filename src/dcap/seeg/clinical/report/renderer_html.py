@@ -7,11 +7,13 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle
 from dcap.seeg.clinical.report.assets import ReportAssetDirs, relpath_for_embed, write_placeholder_png
 from dcap.seeg.clinical.report.base import ReportPaths, df_to_html_table
+
 from dcap.viz.electrodes import plot_electrodes_3d
 
 
@@ -26,7 +28,7 @@ class HtmlClinicalReportRenderer:
         print(paths.report_path)
     """
 
-    def render(self, bundle: ClinicalAnalysisBundle, out_dir: Path) -> ReportPaths:
+    def render(self, bundle: ClinicalAnalysisBundle, out_dir: Path) -> ReportPaths:  # noqa
         asset_dirs = ReportAssetDirs.from_out_dir(out_dir)
         asset_dirs.ensure()
 
@@ -60,7 +62,7 @@ class HtmlClinicalReportRenderer:
                 highlight_value = decisions.get("electrodes_highlight")
                 if isinstance(highlight_value, list):
                     highlight = [str(x) for x in highlight_value]
-        except Exception:
+        except Exception:  # noqa
             highlight = None
 
         plot_electrodes_3d(
@@ -75,10 +77,69 @@ class HtmlClinicalReportRenderer:
         # write_placeholder_png(fig_electrodes_3d)
 
         # ---------------------------------------------------------------------
+        # TRF score localization (3D) using the electrode plotter
+        # ---------------------------------------------------------------------
+        fig_trf_scores_3d = asset_dirs.figures_dir / "trf_scores_3d.png"
+
+        electrodes_df = getattr(bundle, "electrodes_df", None)
+        coords_space = getattr(bundle, "coords_space", None)
+
+        scores_df = _load_trf_scores_df(bundle)
+        if electrodes_df is None or electrodes_df.empty or scores_df is None or scores_df.empty:
+            write_placeholder_png(fig_trf_scores_3d)
+        else:
+            #try:
+            if "name" not in electrodes_df.columns:
+                raise ValueError("electrodes_df missing required 'name' column")
+
+            score_col = _pick_score_column(scores_df)
+            if score_col is None:
+                raise ValueError("Could not infer TRF score column from score table")
+
+            scores_aligned = _align_scores_to_electrodes(
+                electrodes_df=electrodes_df,
+                scores_df=scores_df,
+                score_col=score_col,
+            )
+
+            # Threshold: choose a meaningful default.
+            thr = _choose_meaningful_threshold(scores_aligned)
+
+            # Use signed values for color (if correlation-like), and magnitude for size.
+            color_values = scores_aligned
+            size_values = np.abs(scores_aligned)
+
+            # If correlation-like, use symmetric color limits for interpretability.
+            finite = color_values[np.isfinite(color_values)]
+            if finite.size > 0 and float(np.min(finite)) >= -1.0 and float(np.max(finite)) <= 1.0:
+                vmax = float(np.nanmax(np.abs(finite)))
+                vmin = -vmax
+            else:
+                vmin = None
+                vmax = None
+
+            plot_electrodes_3d(
+                electrodes_df=electrodes_df,
+                out_path=fig_trf_scores_3d,
+                coords_space=coords_space,
+                title=f"TRF scores (3D) — {bundle.subject_id}",
+                color_values=color_values,
+                size_values=size_values,
+                vmin=vmin,
+                vmax=vmax,
+                threshold=thr,
+                threshold_mode="ge",
+                threshold_on="size",   # threshold on magnitude
+                annotate=False,
+            )
+            #except Exception:  # noqa
+            #    write_placeholder_png(fig_trf_scores_3d)
+
+        # ---------------------------------------------------------------------
         # Placeholder figures
         # ---------------------------------------------------------------------
 
-        fig_trf_scores_3d = asset_dirs.figures_dir / "trf_scores_3d.png"
+        # fig_trf_scores_3d = asset_dirs.figures_dir / "trf_scores_3d.png"
         fig_trf_kernel = asset_dirs.figures_dir / "trf_kernel.png"
         fig_trf_scores_bar = asset_dirs.figures_dir / "trf_scores_bar.png"
 
@@ -332,7 +393,7 @@ def _render_qc_html(bundle: ClinicalAnalysisBundle, *, out_dir: Path, qc_figs: D
     if bundle.qc is None:
         return "<em>(QC not computed)</em>"
 
-    parts: list[str] = []
+    parts: list[str] = []  # noqa
 
     parts.append("<h3>Recording</h3>")
     rec = dict(bundle.qc.recording)
@@ -363,7 +424,7 @@ def _render_qc_html(bundle: ClinicalAnalysisBundle, *, out_dir: Path, qc_figs: D
 
 
 def _render_electrodes_html(*, electrode_names: List[str], electrodes_3d_rel: str) -> str:
-    pills = ""
+
     if electrode_names:
         # Show a lot, but keep it compact
         pills = "".join([f'<span class="pill mono">{name}</span>' for name in electrode_names])
@@ -478,7 +539,7 @@ def _find_pngs_under(
     for path in root.rglob("*.png"):
         try:
             rel_parts = path.resolve().relative_to(root).parts
-        except Exception:
+        except Exception:  # noqa
             continue
 
         if len(rel_parts) <= max_depth + 1:
@@ -592,7 +653,7 @@ def _render_existing_png_gallery(
     if not paths:
         return f"<h3>{title}</h3><em>(not found)</em>"
 
-    items: list[str] = [f"<h3>{title}</h3>"]
+    items: list[str] = [f"<h3>{title}</h3>"]  # noqa
     items.append('<div class="gallery">')
 
     for p in paths:
@@ -609,3 +670,161 @@ def _render_existing_png_gallery(
     items.append("</div>")
     return "\n".join(items)
 
+
+# =============================================================================
+# TRF score table helpers
+# =============================================================================
+
+def _load_trf_scores_df(bundle: object) -> Optional[pd.DataFrame]:
+    """
+    Best-effort extraction of TRF scores table.
+
+    Priority
+    --------
+    1) bundle.trf.score_table_path (ClinicalTrfResult)
+    2) bundle.trf_result.score_table_path or bundle.trf_result.extra["score_table_path"]
+    3) bundle.trf_result.extra["score_df"] if present
+
+    Expected minimal schema
+    -----------------------
+    | electrode | score |
+    or
+    | electrode | r |
+    or
+    | electrode | r2 |
+    """
+    # New typed location
+    trf = getattr(bundle, "trf", None)
+    if trf is not None:
+        path = getattr(trf, "score_table_path", None)
+        if path:
+            return _read_table(Path(path))
+
+    # Backward-compat blob
+    trf_result = getattr(bundle, "trf_result", None)
+    if trf_result is None:
+        return None
+
+    # Try direct attribute
+    path = getattr(trf_result, "score_table_path", None)
+    if path:
+        return _read_table(Path(path))
+
+    # Try extra dict
+    extra = getattr(trf_result, "extra", None)
+    if isinstance(extra, dict):
+        if "score_df" in extra and isinstance(extra["score_df"], pd.DataFrame):
+            return extra["score_df"]
+        if "score_table_path" in extra and extra["score_table_path"]:
+            return _read_table(Path(extra["score_table_path"]))
+
+    return None
+
+
+def _read_table(path: Path) -> Optional[pd.DataFrame]:
+    """
+    Read TSV/CSV into a DataFrame (best effort).
+    """
+    if not path.exists():
+        return None
+    suffix = path.suffix.lower()
+    try:
+        if suffix in {".tsv", ".txt"}:
+            return pd.read_csv(path, sep="\t")
+        if suffix in {".csv"}:
+            return pd.read_csv(path)
+        # fallback
+        return pd.read_csv(path)
+    except Exception:  # noqa
+        return None
+
+
+def _pick_score_column(scores_df: pd.DataFrame) -> Optional[str]:
+    """
+    Choose a score column from a TRF score table.
+
+    Preference order:
+    - "score"
+    - "r"
+    - "r2"
+    - first numeric column not named like an id
+    """
+    for col in ("score", "r", "r2"):
+        if col in scores_df.columns:
+            return col
+
+    numeric_cols = [
+        c for c in scores_df.columns
+        if c not in {"channel", "electrode", "name"} and pd.api.types.is_numeric_dtype(scores_df[c])
+    ]
+    return numeric_cols[0] if numeric_cols else None
+
+
+def _align_scores_to_electrodes(
+    *,
+    electrodes_df: pd.DataFrame,
+    scores_df: pd.DataFrame,
+    score_col: str,
+) -> np.ndarray:
+    """
+    Return scores aligned to electrodes_df row order.
+
+    Join logic
+    ----------
+    1) If scores_df has 'electrode', join on electrodes_df['name'] == scores_df['electrode']
+    2) Else if scores_df has 'name', join on electrodes_df['name'] == scores_df['name']
+    3) Else if scores_df has 'channel' AND electrodes_df has 'channel', join on that
+    Otherwise: all NaN
+    """
+    names = electrodes_df["name"].astype(str)
+
+    if "electrode" in scores_df.columns:
+        key = scores_df["electrode"].astype(str)
+        mapping = dict(zip(key, scores_df[score_col].astype(float)))
+        return names.map(lambda n: mapping.get(n, np.nan)).to_numpy()
+
+    if "name" in scores_df.columns:
+        key = scores_df["name"].astype(str)
+        mapping = dict(zip(key, scores_df[score_col].astype(float)))
+        return names.map(lambda n: mapping.get(n, np.nan)).to_numpy()
+
+    if "channel" in scores_df.columns and "channel" in electrodes_df.columns:
+        elec_ch = electrodes_df["channel"].astype(str)
+        score_ch = scores_df["channel"].astype(str)
+        mapping = dict(zip(score_ch, scores_df[score_col].astype(float)))
+        return elec_ch.map(lambda ch: mapping.get(ch, np.nan)).to_numpy()
+
+    return np.full(shape=(len(electrodes_df),), fill_value=np.nan, dtype=float)
+
+
+def _choose_meaningful_threshold(values: np.ndarray) -> float:
+    """
+    Choose a meaningful default threshold for TRF scores.
+
+    Heuristic
+    ---------
+    - Use finite values only.
+    - If scores look correlation-like (range within [-1, 1]), threshold by magnitude:
+        max(0.10, 75th percentile of |score|)
+    - Otherwise, threshold by upper quartile:
+        75th percentile of score (clamped to avoid degenerate thresholds)
+
+    This tends to highlight the strongest ~25% electrodes without assuming a specific metric.
+    """
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0
+
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+
+    if vmin >= -1.0 and vmax <= 1.0:
+        mags = np.abs(finite)
+        thr = float(np.nanpercentile(mags, 75))
+        return max(0.10, thr)
+
+    thr = float(np.nanpercentile(finite, 75))
+    # If everything is identical, percentile can be unhelpful — nudge minimally
+    if not np.isfinite(thr):
+        return 0.0
+    return thr
