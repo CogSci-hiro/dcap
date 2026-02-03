@@ -60,7 +60,14 @@ def run_clinical_report_from_bids(
         else f"ses-{session_id}"
     )
 
-    run_ids_norm = _normalize_run_ids(run_ids=run_ids, run_id=run_id)
+    run_ids_norm = _normalize_run_ids(
+        bids_root=bids_root,
+        subject_id_norm=subject_id_norm,
+        session_id_norm=session_id_norm,
+        task=task,
+        run_ids=run_ids,
+        run_id=run_id,
+    )
 
     # -------------------------------------------------------------------------
     # Load all runs (core step: let it raise if it fails)
@@ -160,31 +167,49 @@ def run_clinical_report_from_bids(
     )
     return fallback_path
 
-def _normalize_run_ids(*, run_ids: Optional[Sequence[str]], run_id: Optional[str]) -> List[str]:
+def _normalize_run_ids(
+    *,
+    bids_root: Path,
+    subject_id_norm: str,
+    session_id_norm: Optional[str],
+    task: str,
+    run_ids: Optional[Sequence[str]],
+    run_id: Optional[str],
+) -> List[str]:
     """
     Normalize run identifiers into a list of BIDS-style `run-XX` strings.
 
-    Rules
-    -----
+    Behavior
+    --------
     - If `run_ids` is provided, use it.
     - Else if `run_id` is provided, treat as single run.
-    - Else raise (for now) — later we can implement "discover all runs".
+    - Else auto-discover runs from BIDS; if none found, raise a helpful error.
     """
     if run_ids is not None and len(run_ids) > 0:
         src = list(run_ids)
     elif run_id is not None:
         src = [run_id]
     else:
-        raise ValueError("Either run_ids or run_id must be provided (multi-run default).")
+        discovered = _discover_run_ids_from_bids(
+            bids_root=bids_root,
+            subject_id=subject_id_norm,
+            session_id=session_id_norm,
+            task=task,
+        )
+        if len(discovered) == 0:
+            raise ValueError(
+                "No runs specified and none could be auto-discovered. "
+                "Provide --run <ID> (e.g. --run 01) or --runs <IDs> (e.g. --runs 01 02 03 04)."
+            )
+        src = discovered
 
     out: List[str] = []
     for r in src:
-        if r is None:
-            continue
         rr = str(r)
         if not rr.startswith("run-"):
             rr = f"run-{rr}"
         out.append(rr)
+
     if len(out) == 0:
         raise ValueError("No valid run ids after normalization.")
     return out
@@ -290,3 +315,52 @@ def _write_fallback_error_report(
 
     path.write_text("".join(lines), encoding="utf-8")
     return path
+
+
+def _discover_run_ids_from_bids(
+    *,
+    bids_root: Path,
+    subject_id: str,
+    session_id: Optional[str],
+    task: str,
+) -> list[str]:
+    """
+    Best-effort run discovery from the BIDS directory structure.
+
+    Returns a sorted list of `run-XX` strings.
+    """
+    subject_dir = bids_root / subject_id
+    if session_id is not None:
+        subject_dir = subject_dir / session_id
+
+    # Usually EEG/iEEG live under ieeg/ or eeg/. We’ll scan both.
+    candidate_dirs = [subject_dir / "ieeg", subject_dir / "eeg"]
+
+    run_ids: set[str] = set()
+    patterns = [
+        f"{subject_id}*task-{task}*run-*.tsv",
+        f"{subject_id}*task-{task}*run-*.edf",
+        f"{subject_id}*task-{task}*run-*.vhdr",
+        f"{subject_id}*task-{task}*run-*.set",
+    ]
+
+    for d in candidate_dirs:
+        if not d.exists():
+            continue
+        for pat in patterns:
+            for p in d.glob(pat):
+                name = p.name
+                # Extract "run-XX" substring
+                idx = name.find("run-")
+                if idx == -1:
+                    continue
+                run_part = name[idx : idx + 6]  # "run-XX" (assumes 2 digits)
+                # Allow longer run ids: run-001 etc
+                j = idx + 4
+                while j < len(name) and name[j].isdigit():
+                    j += 1
+                run_part = name[idx:j]
+                run_ids.add(run_part)
+
+    return sorted(run_ids)
+
