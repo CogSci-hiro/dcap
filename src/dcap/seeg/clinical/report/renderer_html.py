@@ -77,63 +77,54 @@ class HtmlClinicalReportRenderer:
         # write_placeholder_png(fig_electrodes_3d)
 
         # ---------------------------------------------------------------------
-        # TRF score localization (3D) using the electrode plotter
+        # TRF score localization (3D) using plot_electrodes_3d
         # ---------------------------------------------------------------------
         fig_trf_scores_3d = asset_dirs.figures_dir / "trf_scores_3d.png"
 
         electrodes_df = getattr(bundle, "electrodes_df", None)
         coords_space = getattr(bundle, "coords_space", None)
 
-        scores_df = _load_trf_scores_df(bundle)
-        #if electrodes_df is None or electrodes_df.empty or scores_df is None or scores_df.empty:
-        #    write_placeholder_png(fig_trf_scores_3d)
-        #else:
-            #try:
-        if "name" not in electrodes_df.columns:
-            raise ValueError("electrodes_df missing required 'name' column")
+        trf_result = getattr(bundle, "trf_result", None)
+        score_df = None
+        if trf_result is not None and isinstance(getattr(trf_result, "extra", None), dict):
+            score_df = trf_result.extra.get("score_df")
 
-        score_col = _pick_score_column(scores_df)
-        if score_col is None:
-            raise ValueError("Could not infer TRF score column from score table")
-
-        scores_aligned = _align_scores_to_electrodes(
-            electrodes_df=electrodes_df,
-            scores_df=scores_df,
-            score_col=score_col,
-        )
-
-        # Threshold: choose a meaningful default.
-        thr = _choose_meaningful_threshold(scores_aligned)
-
-        # Use signed values for color (if correlation-like), and magnitude for size.
-        color_values = scores_aligned
-        size_values = np.abs(scores_aligned)
-
-        # If correlation-like, use symmetric color limits for interpretability.
-        finite = color_values[np.isfinite(color_values)]
-        if finite.size > 0 and float(np.min(finite)) >= -1.0 and float(np.max(finite)) <= 1.0:
-            vmax = float(np.nanmax(np.abs(finite)))
-            vmin = -vmax
+        if electrodes_df is None or electrodes_df.empty or score_df is None or score_df.empty:
+            write_placeholder_png(fig_trf_scores_3d)
         else:
-            vmin = None
-            vmax = None
+            try:
+                scores_aligned = _align_scores_to_electrodes_by_name(
+                    electrodes_df=electrodes_df,
+                    score_df=score_df,
+                )
 
-        plot_electrodes_3d(
-            electrodes_df=electrodes_df,
-            out_path=fig_trf_scores_3d,
-            coords_space=coords_space,
-            title=f"TRF scores (3D) — {bundle.subject_id}",
-            color_values=color_values,
-            size_values=size_values,
-            vmin=vmin,
-            vmax=vmax,
-            threshold=thr,
-            threshold_mode="ge",
-            threshold_on="size",   # threshold on magnitude
-            annotate=False,
-        )
-            #except Exception:  # noqa
-            #    write_placeholder_png(fig_trf_scores_3d)
+                thr = _default_trf_threshold(scores_aligned)
+
+                # Color uses signed r, size uses |r|
+                color_values = scores_aligned
+                size_values = np.abs(scores_aligned)
+
+                # Symmetric color scale for correlations
+                finite = color_values[np.isfinite(color_values)]
+                vmax = float(np.nanmax(np.abs(finite))) if finite.size > 0 else None
+                vmin = (-vmax) if vmax is not None else None
+
+                plot_electrodes_3d(
+                    electrodes_df=electrodes_df,
+                    out_path=fig_trf_scores_3d,
+                    coords_space=coords_space,
+                    title=f"TRF scores (r) — {bundle.subject_id}",
+                    color_values=color_values,
+                    size_values=size_values,
+                    vmin=vmin,
+                    vmax=vmax,
+                    threshold=thr,
+                    threshold_mode="ge",
+                    threshold_on="size",  # threshold on |r| (magnitude)
+                    annotate=False,
+                )
+            except Exception:
+                write_placeholder_png(fig_trf_scores_3d)
 
         # ---------------------------------------------------------------------
         # Placeholder figures
@@ -828,3 +819,53 @@ def _choose_meaningful_threshold(values: np.ndarray) -> float:
     if not np.isfinite(thr):
         return 0.0
     return thr
+
+
+def _default_trf_threshold(scores: np.ndarray) -> float:
+    """
+    Meaningful default threshold for TRF correlation scores.
+
+    We threshold on magnitude (|r|):
+    - at least 0.10 (below that is typically visually uninformative)
+    - or the 75th percentile of |r| (highlights strongest quartile)
+
+    Returns
+    -------
+    thr
+        Threshold value in the same units as |scores|.
+    """
+    finite = scores[np.isfinite(scores)]
+    if finite.size == 0:
+        return 0.10
+    mags = np.abs(finite)
+    q75 = float(np.nanpercentile(mags, 75))
+    return max(0.10, q75)
+
+
+def _align_scores_to_electrodes_by_name(
+    *,
+    electrodes_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+) -> np.ndarray:
+    """
+    Align TRF scores to electrodes_df row order by matching:
+    electrodes_df['name'] <-> score_df['channel'].
+
+    Returns
+    -------
+    aligned_scores
+        Array length len(electrodes_df), with NaN where no match.
+    """
+    if "name" not in electrodes_df.columns:
+        raise ValueError("electrodes_df missing required 'name' column.")
+    if "channel" not in score_df.columns or "score" not in score_df.columns:
+        raise ValueError("score_df must have columns: 'channel', 'score'.")
+
+    mapping = dict(
+        zip(
+            score_df["channel"].astype(str),
+            score_df["score"].astype(float),
+        )
+    )
+    names = electrodes_df["name"].astype(str)
+    return names.map(lambda n: mapping.get(n, np.nan)).to_numpy(dtype=float)

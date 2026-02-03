@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 import mne
+import numpy as np
 import pandas as pd
 
 from dcap.seeg.clinical.bundle import ClinicalAnalysisBundle, ClinicalAnalysisNotes
@@ -427,6 +428,16 @@ def run_clinical_analysis(
         #
         trf_result = runner(trf_input, trf_cfg, bids_root, subject_id)
 
+        # ---------------------------------------------------------------------
+        # Export channel-wise TRF scores for reporting / 3D localization plot
+        # ---------------------------------------------------------------------
+        score_df = _build_trf_score_df(trf_result)
+        trf_result.extra["score_df"] = score_df
+
+        score_table_path = _maybe_write_trf_scores_table(score_df=score_df, out_dir=out_dir)
+        if score_table_path is not None:
+            trf_result.extra["score_table_path"] = str(score_table_path)
+
     # -------------------------------------------------------------------------
     # Step 5 (optional): save QC figures (controlled side-effect)
     # -------------------------------------------------------------------------
@@ -498,3 +509,55 @@ def run_clinical_analysis(
         electrodes_df=electrodes_df,
         coords_space=coords_space,
     )
+
+
+# =============================================================================
+# TRF score export (for reporting / viz)
+# =============================================================================
+
+def _build_trf_score_df(trf_result: TRFResult) -> pd.DataFrame:
+    """
+    Build a channel-wise TRF score DataFrame from TRFResult.extra.
+
+    Returns
+    -------
+    score_df
+        Columns: channel, score
+    """
+    extra = trf_result.extra or {}
+    channel_names = extra.get("channel_names", [])
+    scores = extra.get("scores", None)
+
+    if scores is None:
+        raise ValueError("TRFResult.extra['scores'] is missing.")
+    scores_arr = np.asarray(scores, dtype=float)
+
+    if len(channel_names) != int(scores_arr.shape[0]):
+        raise ValueError(
+            "TRF scores shape does not match channel_names length: "
+            f"{scores_arr.shape[0]} vs {len(channel_names)}."
+        )
+
+    return pd.DataFrame(
+        {
+            "channel": [str(x) for x in channel_names],
+            "score": scores_arr.astype(float),
+        }
+    )
+
+
+def _maybe_write_trf_scores_table(
+    *,
+    score_df: pd.DataFrame,
+    out_dir: Optional[Path],
+) -> Optional[Path]:
+    """
+    Write TRF score table to out_dir/tables if out_dir is provided.
+    """
+    if out_dir is None:
+        return None
+    tables_dir = out_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    out_path = tables_dir / "trf_scores.tsv"
+    score_df.to_csv(out_path, sep="\t", index=False)
+    return out_path
