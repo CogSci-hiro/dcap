@@ -29,9 +29,9 @@ class TRFConfig:
     ----------
     model_name
         Human-readable model label (e.g., "mTRF", "ridge").
-    tmin_s
+    tmin_ms
         Minimum lag in seconds.
-    tmax_s
+    tmax_ms
         Maximum lag in seconds.
     alpha
         Regularization strength (if applicable).
