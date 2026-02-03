@@ -132,6 +132,13 @@ def plot_electrodes_3d(
     abs_max = float(np.nanmax(np.abs(xyz)))
     xyz_m = xyz if abs_max < 1.0 else xyz * 1e-3
 
+    # -------------------------------------------------------------------------
+    # View stabilization: compute scene extent from ALL electrodes (pre-threshold)
+    # so camera distance is identical across different marker subsets.
+    # -------------------------------------------------------------------------
+    _, global_extent_all_m = _compute_scene_center_and_extent(xyz_m=xyz_m)
+    camera_distance = float(6.0 * global_extent_all_m)
+
     names = cleaned_df["name"].astype(str).to_numpy()
     highlight_set = set(highlight or [])
 
@@ -242,12 +249,6 @@ def plot_electrodes_3d(
         size_min=size_min,
         size_max=size_max,
     )
-
-    # -------------------------------------------------------------------------
-    # Camera distance is stabilized based on the kept electrode geometry.
-    # -------------------------------------------------------------------------
-    _, global_extent_m = _compute_scene_center_and_extent(xyz_m=xyz_m_kept)
-    camera_distance = float(6.0 * global_extent_m)
 
     try:
         for i, view in enumerate(VIEWS_2X2):
@@ -514,7 +515,6 @@ def _compute_threshold_mask(
         raise ValueError(f"Unknown threshold_mode: {threshold_mode}")
 
     return mask
-
 
 
 def _make_dig_montage_mni_tal_compat(*, ch_pos_m: dict[str, np.ndarray]):
