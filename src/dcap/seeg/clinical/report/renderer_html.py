@@ -85,53 +85,53 @@ class HtmlClinicalReportRenderer:
         coords_space = getattr(bundle, "coords_space", None)
 
         scores_df = _load_trf_scores_df(bundle)
-        if electrodes_df is None or electrodes_df.empty or scores_df is None or scores_df.empty:
-            write_placeholder_png(fig_trf_scores_3d)
-        else:
+        #if electrodes_df is None or electrodes_df.empty or scores_df is None or scores_df.empty:
+        #    write_placeholder_png(fig_trf_scores_3d)
+        #else:
             #try:
-            if "name" not in electrodes_df.columns:
-                raise ValueError("electrodes_df missing required 'name' column")
+        if "name" not in electrodes_df.columns:
+            raise ValueError("electrodes_df missing required 'name' column")
 
-            score_col = _pick_score_column(scores_df)
-            if score_col is None:
-                raise ValueError("Could not infer TRF score column from score table")
+        score_col = _pick_score_column(scores_df)
+        if score_col is None:
+            raise ValueError("Could not infer TRF score column from score table")
 
-            scores_aligned = _align_scores_to_electrodes(
-                electrodes_df=electrodes_df,
-                scores_df=scores_df,
-                score_col=score_col,
-            )
+        scores_aligned = _align_scores_to_electrodes(
+            electrodes_df=electrodes_df,
+            scores_df=scores_df,
+            score_col=score_col,
+        )
 
-            # Threshold: choose a meaningful default.
-            thr = _choose_meaningful_threshold(scores_aligned)
+        # Threshold: choose a meaningful default.
+        thr = _choose_meaningful_threshold(scores_aligned)
 
-            # Use signed values for color (if correlation-like), and magnitude for size.
-            color_values = scores_aligned
-            size_values = np.abs(scores_aligned)
+        # Use signed values for color (if correlation-like), and magnitude for size.
+        color_values = scores_aligned
+        size_values = np.abs(scores_aligned)
 
-            # If correlation-like, use symmetric color limits for interpretability.
-            finite = color_values[np.isfinite(color_values)]
-            if finite.size > 0 and float(np.min(finite)) >= -1.0 and float(np.max(finite)) <= 1.0:
-                vmax = float(np.nanmax(np.abs(finite)))
-                vmin = -vmax
-            else:
-                vmin = None
-                vmax = None
+        # If correlation-like, use symmetric color limits for interpretability.
+        finite = color_values[np.isfinite(color_values)]
+        if finite.size > 0 and float(np.min(finite)) >= -1.0 and float(np.max(finite)) <= 1.0:
+            vmax = float(np.nanmax(np.abs(finite)))
+            vmin = -vmax
+        else:
+            vmin = None
+            vmax = None
 
-            plot_electrodes_3d(
-                electrodes_df=electrodes_df,
-                out_path=fig_trf_scores_3d,
-                coords_space=coords_space,
-                title=f"TRF scores (3D) — {bundle.subject_id}",
-                color_values=color_values,
-                size_values=size_values,
-                vmin=vmin,
-                vmax=vmax,
-                threshold=thr,
-                threshold_mode="ge",
-                threshold_on="size",   # threshold on magnitude
-                annotate=False,
-            )
+        plot_electrodes_3d(
+            electrodes_df=electrodes_df,
+            out_path=fig_trf_scores_3d,
+            coords_space=coords_space,
+            title=f"TRF scores (3D) — {bundle.subject_id}",
+            color_values=color_values,
+            size_values=size_values,
+            vmin=vmin,
+            vmax=vmax,
+            threshold=thr,
+            threshold_mode="ge",
+            threshold_on="size",   # threshold on magnitude
+            annotate=False,
+        )
             #except Exception:  # noqa
             #    write_placeholder_png(fig_trf_scores_3d)
 
