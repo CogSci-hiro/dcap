@@ -241,11 +241,7 @@ def _attach_electrodes_df(*, bundle: object, electrodes_table: object) -> None:
                 break
 
     # Attach for renderers
-    try:
-        setattr(bundle, "electrodes_df", electrodes_df)
-    except Exception:
-        # If bundle is frozen/slots-only, we silently skip for now.
-        return
+    setattr(bundle, "electrodes_df", electrodes_df)
 
 def _write_fallback_error_report(
     *,
