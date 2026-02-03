@@ -18,6 +18,8 @@ from dcap.seeg.clinical.report import render_report
 from dcap.seeg.io.bids import load_bids_run
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig, GammaEnvelopeConfig
 from dcap.seeg.trf.contracts import TRFConfig
+from dcap.errors.policy import ErrorPolicy, ErrorMode, run_with_policy
+from dcap.errors.record import ErrorLog
 
 
 def run_clinical_report_from_bids(
@@ -34,16 +36,23 @@ def run_clinical_report_from_bids(
     trf_cfg: Optional[TRFConfig] = None,
     trf_runner: Optional[object] = None,
     report_format: str = "html",
-    run_ids: Optional[Sequence[str]] = None,  # NEW (preferred)
+    run_ids: Optional[Sequence[str]] = None,
 ) -> Path:
     """
-    Run an end-to-end clinical analysis from BIDS and write a report.
+    Multi-run clinical analysis from BIDS and write a report.
 
-    Notes
-    -----
-    - Multi-run is supported via `run_ids`. If `run_ids` is None, falls back to
-      `run_id` for single-run behavior.
+    Error handling
+    --------------
+    - Core analysis failures raise (load + preprocessing + TRF fitting).
+    - Report assembly and optional bridges use ErrorPolicy and are never silent.
     """
+
+    # -------------------------------------------------------------------------
+    # Error policy / log (reports should degrade gracefully, not silently)
+    # -------------------------------------------------------------------------
+    policy = ErrorPolicy(mode=ErrorMode.COLLECT)   # dev/tests can override to RAISE
+    error_log = ErrorLog()
+
     subject_id_norm = subject_id if subject_id.startswith("sub-") else f"sub-{subject_id}"
     session_id_norm = (
         session_id
@@ -51,11 +60,10 @@ def run_clinical_report_from_bids(
         else f"ses-{session_id}"
     )
 
-    # Normalize requested runs
     run_ids_norm = _normalize_run_ids(run_ids=run_ids, run_id=run_id)
 
     # -------------------------------------------------------------------------
-    # Load all runs (Raw + events) and keep electrodes table (assume consistent)
+    # Load all runs (core step: let it raise if it fails)
     # -------------------------------------------------------------------------
     raws: List[mne.io.BaseRaw] = []
     events_by_run: Dict[str, Any] = {}
@@ -72,27 +80,15 @@ def run_clinical_report_from_bids(
         raws.append(raw_i)
         events_by_run[rid] = events_df_i
 
-        # Prefer first non-null electrode table; assume consistent across runs
         if electrodes_table is None and electrodes_table_i is not None:
             electrodes_table = electrodes_table_i
 
-    # -------------------------------------------------------------------------
-    # Decide what to pass as events_df
-    # -------------------------------------------------------------------------
-    #
-    # For TRF across epochs (runs), your TRF adapter/runner should be run-aware.
-    # Minimal approach: pass a dict by run_id and update TRFInput typing later.
-    #
-    events_payload: Any
-    if trf_cfg is not None:
-        events_payload = events_by_run
-    else:
-        # Keep a single-run-like default for non-TRF paths
-        events_payload = events_by_run[run_ids_norm[0]]
+    # For TRF we pass a run-aware container for now
+    events_payload: Any = events_by_run if trf_cfg is not None else events_by_run[run_ids_norm[0]]
 
     bundle = run_clinical_analysis(
         raws=raws,
-        bids_root=bids_root,
+        bids_root=bids_root,  # IMPORTANT: keep as Path, not str
         subject_id=subject_id_norm,
         session_id=session_id_norm,
         run_ids=list(run_ids_norm),
@@ -109,13 +105,60 @@ def run_clinical_report_from_bids(
     )
 
     # -------------------------------------------------------------------------
-    # Bridge (temporary): electrode info for renderer(s)
+    # Attach policy + log to bundle (best-effort, but never silent)
     # -------------------------------------------------------------------------
-    _attach_electrodes_df(bundle=bundle, electrodes_table=electrodes_table)
+    run_with_policy(
+        lambda: _attach_error_handles_to_bundle(bundle=bundle, policy=policy, error_log=error_log),
+        policy=policy,
+        stage="reports.bridge",
+        artifact="bundle_error_handles",
+        context={"subject_id": subject_id_norm, "session_id": session_id_norm},
+        error_log=error_log,
+        on_error_return=None,
+        optional=True,
+    )
 
-    report_paths = render_report(bundle=bundle, out_dir=out_dir, format=report_format)
-    return report_paths.report_path
+    # -------------------------------------------------------------------------
+    # Bridge: electrode info for renderer (optional but should never be silent)
+    # -------------------------------------------------------------------------
+    run_with_policy(
+        lambda: _attach_electrodes_df(bundle=bundle, electrodes_table=electrodes_table),
+        policy=policy,
+        stage="reports.bridge",
+        artifact="electrodes_df",
+        context={"subject_id": subject_id_norm, "session_id": session_id_norm},
+        error_log=error_log,
+        on_error_return=None,
+        optional=True,
+    )
 
+    # -------------------------------------------------------------------------
+    # Render report (should degrade gracefully: if it fails, write a fallback)
+    # -------------------------------------------------------------------------
+    report_paths = run_with_policy(
+        lambda: render_report(bundle=bundle, out_dir=out_dir, format=report_format),
+        policy=policy,
+        stage="reports.render",
+        artifact=f"clinical_report_{report_format}",
+        context={"out_dir": str(out_dir), "format": report_format},
+        error_log=error_log,
+        on_error_return=None,
+        optional=False,
+    )
+
+    if report_paths is not None:
+        return report_paths.report_path
+
+    # If rendering failed and policy allowed continuation, write a fallback report
+    fallback_path = _write_fallback_error_report(
+        out_dir=out_dir,
+        subject_id=subject_id_norm,
+        session_id=session_id_norm,
+        run_ids=list(run_ids_norm),
+        error_log=error_log,
+        report_format=report_format,
+    )
+    return fallback_path
 
 def _normalize_run_ids(*, run_ids: Optional[Sequence[str]], run_id: Optional[str]) -> List[str]:
     """
@@ -146,6 +189,16 @@ def _normalize_run_ids(*, run_ids: Optional[Sequence[str]], run_id: Optional[str
         raise ValueError("No valid run ids after normalization.")
     return out
 
+
+def _attach_error_handles_to_bundle(*, bundle: object, policy: ErrorPolicy, error_log: ErrorLog) -> None:
+    """
+    Attach error policy/log to bundle for downstream renderers.
+
+    This is best-effort because some bundles may be frozen or slots-only.
+    Any failure should be handled by the caller via run_with_policy.
+    """
+    setattr(bundle, "error_policy", policy)
+    setattr(bundle, "error_log", error_log)
 
 
 def _attach_electrodes_df(*, bundle: object, electrodes_table: object) -> None:
@@ -193,3 +246,53 @@ def _attach_electrodes_df(*, bundle: object, electrodes_table: object) -> None:
     except Exception:
         # If bundle is frozen/slots-only, we silently skip for now.
         return
+
+def _write_fallback_error_report(
+    *,
+    out_dir: Path,
+    subject_id: str,
+    session_id: Optional[str],
+    run_ids: Sequence[str],
+    error_log: ErrorLog,
+    report_format: str,
+) -> Path:
+    """
+    Always produce an artifact explaining what failed.
+
+    Writes a simple Markdown file. If HTML was requested, we still write MD
+    because it's robust and readable in any environment.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "clinical_report_ERROR.md"
+
+    lines: List[str] = []
+    lines.append(f"# Clinical report failed to render\n")
+    lines.append(f"- subject_id: `{subject_id}`\n")
+    lines.append(f"- session_id: `{session_id}`\n")
+    lines.append(f"- runs: `{list(run_ids)}`\n")
+    lines.append(f"- requested_format: `{report_format}`\n\n")
+
+    lines.append("## Errors\n\n")
+
+    # We don't know the exact ErrorLog API, but typical is `.records` being a list.
+    # If your ErrorLog uses a different attribute, tweak here once.
+    records = getattr(error_log, "records", None)
+    if not records:
+        lines.append("_No error records found (unexpected)._ \n")
+    else:
+        for i, rec in enumerate(records, start=1):
+            # Make this robust to dict-like or dataclass-like records
+            stage = getattr(rec, "stage", None) or rec.get("stage") if isinstance(rec, dict) else None
+            artifact = getattr(rec, "artifact", None) or rec.get("artifact") if isinstance(rec, dict) else None
+            message = getattr(rec, "message", None) or rec.get("message") if isinstance(rec, dict) else None
+            exc_type = getattr(rec, "exc_type", None) or rec.get("exc_type") if isinstance(rec, dict) else None
+
+            lines.append(f"{i}. **stage**: `{stage}` | **artifact**: `{artifact}`\n")
+            if exc_type:
+                lines.append(f"   - exc_type: `{exc_type}`\n")
+            if message:
+                lines.append(f"   - message: {message}\n")
+            lines.append("\n")
+
+    path.write_text("".join(lines), encoding="utf-8")
+    return path
