@@ -164,7 +164,7 @@ def _normalize_electrodes_df(
         def _get_coord(v: Any, idx: int) -> float:
             try:
                 return float(v[idx])
-            except Exception:
+            except Exception:  # noqa
                 return float("nan")
 
         df["x"] = df["coords"].map(lambda v: _get_coord(v, 0))
