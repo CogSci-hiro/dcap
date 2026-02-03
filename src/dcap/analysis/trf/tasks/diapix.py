@@ -2,12 +2,11 @@
 #                         TRF task adapter: Diapix
 # =============================================================================
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Literal
 
 import numpy as np
 import pandas as pd
@@ -19,27 +18,41 @@ from dcap.analysis.trf.prep import stack_time_epoch_feature
 from dcap.analysis.trf.tasks.base import TrfEpochedData
 
 
+EnvelopeChannelMode = Literal["mean", "self", "other", "all"]
+
+
+@dataclass(frozen=True, slots=True)
+class EnvelopeFromWavConfig:
+    lowpass_hz: float = 20.0
+    channel_mode: EnvelopeChannelMode = "all"   # NEW default
+    target_sfreq: float = 100.0
+
+
 @dataclass(frozen=True, slots=True)
 class EnvelopeFromWavConfig:
     """
-    Configuration for computing an amplitude envelope from a WAV file.
+    Configuration for computing amplitude envelope feature(s) from a WAV file.
 
     Parameters
     ----------
-    lowpass_hz : float
-        Low-pass cutoff applied to the Hilbert amplitude envelope.
-    mono : bool
-        If True, average audio channels to mono.
-    target_sfreq : float
-        Sampling frequency of the returned envelope.
+    lowpass_hz
+        Low-pass cutoff applied to the Hilbert amplitude envelope (Hz).
+    channel_mode
+        How to map WAV channels to envelope feature(s):
+
+        - "mean": average all channels -> 1 feature
+        - "self": channel 0 -> 1 feature
+        - "other": channel 1 -> 1 feature (requires >=2 channels)
+        - "all": 3 features [mean, ch0, ch1] (requires >=2 channels)
+    target_sfreq
+        Sampling frequency of returned envelope feature(s) (Hz).
 
     Usage example
     -------------
-        cfg = EnvelopeFromWavConfig(lowpass_hz=20.0, mono=True, target_sfreq=100.0)
+        cfg = EnvelopeFromWavConfig(channel_mode="all", target_sfreq=100.0)
     """
-
     lowpass_hz: float = 20.0
-    mono: bool = True
+    channel_mode: EnvelopeChannelMode = "all"
     target_sfreq: float = 100.0
 
 
@@ -271,13 +284,15 @@ class DiapixTrfAdapter:
 
     def _compute_envelope_from_wav(self, wav_path: Path, cfg: EnvelopeFromWavConfig) -> tuple[np.ndarray, float]:
         """
-        Compute a speech envelope feature X from a WAV file.
+        Compute envelope feature(s) X from a WAV file.
 
         Returns
         -------
-        X : ndarray, shape (n_times, 1)
+        X : ndarray, shape (n_times, n_features)
+            n_features == 1 for {"mean","self","other"}
+            n_features == 3 for "all" -> [mean, ch0, ch1]
         sfreq : float
-            Sampling frequency of X (Hz).
+            Sampling frequency of X (Hz), after resampling to cfg.target_sfreq.
         """
         try:
             import soundfile as sf  # type: ignore
@@ -285,33 +300,51 @@ class DiapixTrfAdapter:
             raise ImportError("Reading WAV requires 'soundfile' (pip install soundfile).") from exc
 
         audio, sfreq_in = sf.read(str(wav_path), always_2d=True)  # (n_samples, n_channels)
-        if cfg.mono:
-            x = np.mean(audio, axis=1)
+        n_channels = int(audio.shape[1])
+
+        mode = cfg.channel_mode
+        if mode == "mean":
+            waves = [np.mean(audio, axis=1)]
+        elif mode == "self":
+            waves = [audio[:, 0]]
+        elif mode == "other":
+            if n_channels < 2:
+                raise ValueError(f"{wav_path}: channel_mode='other' requires >=2 channels, got {n_channels}.")
+            waves = [audio[:, 1]]
+        elif mode == "all":
+            if n_channels < 2:
+                raise ValueError(f"{wav_path}: channel_mode='all' requires >=2 channels, got {n_channels}.")
+            waves = [np.mean(audio, axis=1), audio[:, 0], audio[:, 1]]
         else:
-            x = audio[:, 0]
+            raise ValueError(f"Unsupported channel_mode={mode!r}.")
 
-        x = x.astype(np.float64, copy=False)
-        x = x - float(np.mean(x))
+        # Envelope per waveform
+        env_feats = []
+        for x in waves:
+            x = x.astype(np.float64, copy=False)
+            x = x - float(np.mean(x))
 
-        amp = np.abs(hilbert(x))
+            amp = np.abs(hilbert(x))
 
-        nyq = 0.5 * float(sfreq_in)
-        cutoff = float(cfg.lowpass_hz)
-        if cutoff <= 0 or cutoff >= nyq:
-            raise ValueError(f"Envelope lowpass_hz must be in (0, {nyq}). Got {cutoff}.")
-        b, a = butter(N=4, Wn=cutoff / nyq, btype="low")
-        env = filtfilt(b, a, amp).astype(np.float64)
+            nyq = 0.5 * float(sfreq_in)
+            cutoff = float(cfg.lowpass_hz)
+            if cutoff <= 0 or cutoff >= nyq:
+                raise ValueError(f"Envelope lowpass_hz must be in (0, {nyq}). Got {cutoff}.")
+
+            b, a = butter(N=4, Wn=cutoff / nyq, btype="low")  # noqa
+            env = filtfilt(b, a, amp).astype(np.float64, copy=False)  # noqa
+            env_feats.append(env)
+
+        X = np.stack(env_feats, axis=1)  # (time, feature)
 
         sfreq_out = float(cfg.target_sfreq)
         if sfreq_out <= 0:
             raise ValueError("Envelope target_sfreq must be > 0.")
 
         if sfreq_out != float(sfreq_in):
-            ratio = sfreq_out / float(sfreq_in)
-            frac = Fraction(ratio).limit_denominator(1000)
-            env = resample_poly(env, up=int(frac.numerator), down=int(frac.denominator))
+            X = self._resample_time_feature(X, sfreq_in=float(sfreq_in), sfreq_out=sfreq_out)
 
-        return env.reshape(-1, 1), sfreq_out
+        return X, sfreq_out
 
     def _load_neural_raw(self, neural_ref: Any) -> mne.io.BaseRaw:
         """

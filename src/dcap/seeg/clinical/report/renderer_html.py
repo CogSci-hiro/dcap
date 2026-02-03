@@ -16,7 +16,7 @@ from dcap.seeg.clinical.report.base import ReportPaths, df_to_html_table
 
 from dcap.viz.electrodes import plot_electrodes_3d
 
-MANUAL_TRF_SCORE_THRESHOLD = 0.09
+DEFAULT_TRF_SCORE_THRESHOLD = 0.2
 
 
 class HtmlClinicalReportRenderer:
@@ -120,7 +120,7 @@ class HtmlClinicalReportRenderer:
                     size_values=size_values,
                     vmin=None,
                     vmax=vmax,
-                    threshold=MANUAL_TRF_SCORE_THRESHOLD,
+                    threshold=DEFAULT_TRF_SCORE_THRESHOLD,
                     threshold_mode="ge",
                     threshold_on="size",  # threshold on |r| (magnitude)
                     annotate=False,
