@@ -4,10 +4,11 @@
 # =============================================================================
 
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import mne
 from mne_bids import BIDSPath
+import numpy as np
 
 from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
 from dcap.bids.tasks.diapix.models import DiapixRecordingUnit, DiapixTiming
@@ -15,6 +16,9 @@ from dcap.bids.tasks.diapix.heuristics import ensure_vhdr_utf8
 from dcap.bids.tasks.diapix.audio import crop_and_normalize_audio
 from dcap.bids.tasks.diapix.events import prepare_diapix_events
 from dcap.bids.tasks.diapix.triggers import _TRIGGER_ID_MAP
+from dcap.bids.tasks._shared.trigger_alignment_qc import (  # noqa
+    write_trigger_alignment_qc_json,
+)
 
 
 class DiapixTask(BidsTask):
@@ -63,6 +67,8 @@ class DiapixTask(BidsTask):
 
         self._timing = timing if timing is not None else DiapixTiming()
 
+        self._trigger_alignment_qc_cache: dict[str, dict[str, Any]] = {}
+
     def discover(self, source_root: Path) -> Sequence[RecordingUnit]:
         source_root = Path(source_root).expanduser().resolve()
         vhdr_paths = sorted(source_root.glob("conversation_*.vhdr"))
@@ -109,21 +115,18 @@ class DiapixTask(BidsTask):
     def prepare_events(self, raw: mne.io.BaseRaw, unit: RecordingUnit, bids_path: BIDSPath) -> PreparedEvents:
         assert isinstance(unit, DiapixRecordingUnit)
 
+        cache_key = str(unit.vhdr_path)
+
         trigger_id = get_trigger_id(self._dcap_id, run=unit.run)
 
-        prepared, raw_out = prepare_diapix_events(
+        prepared, alignment = prepare_diapix_events(
             raw=raw,
             subject_bids=unit.subject_bids,
             run=unit.run,
             stim_wav=self._stim_wav,
             trigger_id=trigger_id,
         )
-
-        if raw_out is not raw:
-            raise RuntimeError(
-                "prepare_events returned a modified raw. "
-                "Padding/rewriting raw must happen in load_raw() to respect the core contract."
-            )
+        self._trigger_alignment_qc_cache[cache_key] = alignment
 
         return prepared
 
@@ -139,7 +142,7 @@ class DiapixTask(BidsTask):
             src_wav=unit.wav_path,
             dst_wav=audio_out_path,
             audio_onsets_tsv=self._audio_onsets_tsv,
-            dcap_id=self._dcap_id,  # ✅ private key
+            dcap_id=self._dcap_id,
             run=str(unit.run),
             duration_s=self._timing.conversation_duration_s,
         )
@@ -150,6 +153,22 @@ class DiapixTask(BidsTask):
             video_dir.mkdir(parents=True, exist_ok=True)
             video_out = video_dir / f"sub-{unit.subject_bids}_task-diapix_run-{unit.run}.asf"
             video_out.write_bytes(unit.video_path.read_bytes())
+
+        # Trigger alignment JSON creation
+        cache_key = str(unit.vhdr_path)
+        payload = self._trigger_alignment_qc_cache.get(cache_key)
+        if payload is None:
+            return
+
+        _ = write_trigger_alignment_qc_json(
+            bids_root=infer_bids_root_from_written_file(bids_path.fpath),
+            subject=unit.subject_bids,
+            session=getattr(unit, "session_bids", None),
+            datatype=bids_path.datatype,
+            filename_stem=bids_path.fpath.stem,
+            payload=payload,
+            dcap_version="0.0.0",  # replace with your version getter
+        )
 
 
 def _strip_sub_prefix(bids_subject: str) -> str:
@@ -165,4 +184,12 @@ def get_trigger_id(dcap_id: str, run: str) -> int:
             f"No trigger_id defined for Diapix "
             f"(dcap_id={dcap_id}, run={run})"
         ) from exc
+
+
+def infer_bids_root_from_written_file(written_file: Path) -> Path:
+    """Infer BIDS root from a file path like <bids_root>/sub-XXX/..."""
+    for parent in [written_file, *written_file.parents]:
+        if parent.name.startswith("sub-"):
+            return parent.parent
+    raise ValueError(f"Could not infer BIDS root from path: {written_file}")
 

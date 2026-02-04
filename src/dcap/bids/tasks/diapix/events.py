@@ -4,7 +4,7 @@
 # =============================================================================
 
 from pathlib import Path
-from typing import Dict, Final, Tuple
+from typing import Any, Dict, Final, Tuple
 
 import mne
 import numpy as np
@@ -30,7 +30,7 @@ def prepare_diapix_events(
     run: str,
     stim_wav: Path,
     trigger_id: int,
-) -> Tuple[PreparedEvents, mne.io.BaseRaw]:
+) -> Tuple[PreparedEvents, dict[str, Any]]:
     """
     Create Diapix events for BIDS writing.
 
@@ -76,25 +76,24 @@ def prepare_diapix_events(
 
     trigger_events = orig_events[orig_events[:, 2] == trigger_id]
     if trigger_events.size == 0:
-        raise ValueError(f"No triggers found for trigger_id={trigger_id} (subject={subject_bids}, run={run}).")
+        raise ValueError(
+            f"No triggers found for trigger_id={trigger_id} (subject={subject_bids}, run={run})."
+        )
 
-    delay_s = _compute_delay_seconds(
+    delay_s, wav_onsets_s, raw_onsets_s = _compute_delay_seconds(
         raw_trigger_events=trigger_events,
         sfreq=sfreq,
         stim_wav=stim_wav,
     )
-    print(delay_s)
 
-    conversation_start_s = START_DELAY_S + delay_s
+    conversation_start_s = float(START_DELAY_S + delay_s)
 
-    raw_out = raw
-    if conversation_start_s < 0:
-        # Need to pad raw so the start becomes 0
-        pad_samples = int(abs(conversation_start_s) * sfreq)
-        raw_out = _pad_raw_at_start(raw, pad_samples=pad_samples)
-        conversation_start_sample = 0
-    else:
-        conversation_start_sample = int(conversation_start_s * sfreq)
+    # How much data is missing *before* the recording starts (if any)
+    pad_required_s = float(max(0.0, -conversation_start_s))
+
+    # We are NOT allowed to pad raw here (core contract), so we clamp events to valid range.
+    conversation_start_s_clamped = max(0.0, conversation_start_s)
+    conversation_start_sample = int(conversation_start_s_clamped * sfreq)
 
     conversation_end_sample = conversation_start_sample + int(CONVERSATION_DURATION_S * sfreq)
 
@@ -107,7 +106,14 @@ def prepare_diapix_events(
     event_id = {k: v for k, v in DEFAULT_EVENTS_DICT.items()}
     prepared = PreparedEvents(events=events, event_id=event_id)
 
-    return prepared, raw_out
+    alignment: dict[str, Any] = {
+        "delay_s": float(delay_s),
+        "conversation_start_s": float(conversation_start_s),
+        "pad_required_s": float(pad_required_s),
+        "wav_onsets_s": wav_onsets_s,  # np.ndarray
+        "raw_onsets_s": raw_onsets_s,  # np.ndarray
+    }
+    return prepared, alignment
 
 
 def _pad_raw_at_start(raw: mne.io.BaseRaw, *, pad_samples: int) -> mne.io.BaseRaw:
@@ -143,7 +149,9 @@ def _get_raw_trigger_onsets_and_intervals(*, raw_trigger_events: np.ndarray, sfr
     return onsets_s[:-1], intervals_s
 
 
-def _compute_delay_seconds(*, raw_trigger_events: np.ndarray, sfreq: float, stim_wav: Path) -> float:
+def _compute_delay_seconds(*,
+                           raw_trigger_events: np.ndarray,
+                           sfreq: float, stim_wav: Path) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     Estimate delay between WAV trigger train and raw trigger train via interval matching.
 
@@ -167,7 +175,7 @@ def _compute_delay_seconds(*, raw_trigger_events: np.ndarray, sfreq: float, stim
         wav_onsets=wav_onsets,
         wav_intervals=wav_intervals,
         tolerance=0.005,
-    )
+    ), wav_onsets, raw_onsets
 
 
 def _match_intervals_delay_mad(
