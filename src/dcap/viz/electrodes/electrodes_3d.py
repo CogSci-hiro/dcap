@@ -39,7 +39,7 @@ DEFAULT_MARKER = "o"
 DEFAULT_FACE_COLOR = "#FFA500"
 DEFAULT_EDGE_COLOR = "k"
 DEFAULT_ALPHA = 1.0
-DEFAULT_CMAP = "inferno"
+DEFAULT_CMAP = "plasma"
 
 VTK_WINDOW_SIZE_PX = (800, 800)
 
@@ -50,41 +50,160 @@ ThresholdMode = Literal["ge", "gt", "le", "lt"]
 _APOSTROPHE_PATTERN = re.compile(r".*'.*")
 
 
+# =============================================================================
+#                     ########################################
+#                     #             ELECTRODES 3D             #
+#                     ########################################
+# =============================================================================
 def plot_electrodes_3d(
     *,
-    electrodes_df: pd.DataFrame,
-    out_path: Path,
-    coords_space: Optional[str] = None,
-    title: Optional[str] = None,
-    highlight: Optional[Sequence[str]] = None,
-    figsize: tuple[float, float] = (6.0, 6.0),
+    electrodes_df: "pd.DataFrame",
+    out_path: "Path",
+    coords_space: "Optional[str]" = None,
+    title: "Optional[str]" = None,
+    highlight: "Optional[Sequence[str]]" = None,
+    figsize: "tuple[float, float]" = (6.0, 6.0),
     dpi: int = 150,
-    color_values: Optional[Sequence[float]] = None,
-    size_values: Optional[Sequence[float]] = None,
+    color_values: "Optional[Sequence[float]]" = None,
+    size_values: "Optional[Sequence[float]]" = None,
     cmap: str = DEFAULT_CMAP,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-    size_min: Optional[float] = None,
-    size_max: Optional[float] = None,
-    threshold: Optional[float] = None,
-    threshold_mode: ThresholdMode = "ge",
-    threshold_on: Literal["auto", "color", "size"] = "auto",
+    vmin: "Optional[float]" = None,
+    vmax: "Optional[float]" = None,
+    size_min: "Optional[float]" = None,
+    size_max: "Optional[float]" = None,
+    threshold: "Optional[float]" = None,
+    threshold_mode: "ThresholdMode" = "ge",
+    threshold_on: "Literal['auto', 'color', 'size']" = "auto",
     marker: str = DEFAULT_MARKER,
     base_size: float = 20.0,
     highlight_size: float = 280.0,
     annotate: bool = False,
-    style: StyleConfig = DEFAULT_STYLE,
-    render_markers: bool = True,  # NEW: backward-compatible testing hook
-    show_below_threshold: bool = False,
+    style: "StyleConfig" = DEFAULT_STYLE,
+    render_markers: bool = True,
+    show_below_threshold: bool = True,
     below_threshold_size: float = 5.0,
-    below_threshold_alpha: float = 0.2,
-    below_threshold_color: str = "#888888",
+    below_threshold_alpha: float = 0.35,
+    below_threshold_color: str = "k",
 ) -> None:
+    """
+    Render a static 2x2 fsaverage underlay with 2D electrode overlay (Top/Front/Right/Left).
+
+    This function intentionally matches the robust behavior of `visualization.py`:
+    - The 3D brain underlay is created without electrodes (montage-free figure).
+    - For each view, we set a camera with `mne.viz.set_3d_view(...)`.
+    - We obtain a 2D snapshot plus pixel coordinates via `mne.viz.snapshot_brain_montage(...)`.
+      IMPORTANT: `hide_sensors=False` is used to avoid hemi clipping edge-cases.
+
+    Thresholding behavior
+    ---------------------
+    - "Kept" electrodes (meeting threshold) are plotted using your usual sizing/color mapping.
+    - If `show_below_threshold=True`, below-threshold electrodes are also plotted as fixed-size
+      neutral dots for context.
+
+    Parameters
+    ----------
+    electrodes_df
+        Electrode table with at least columns: name, x, y, z (and optionally space).
+        Coordinates may be in meters or millimeters; units are inferred by magnitude.
+    out_path
+        Output PNG path.
+    coords_space
+        Label for the coordinate space (e.g., "MNI152") used for the title.
+    title
+        Optional plot title.
+    highlight
+        Names to highlight (drawn larger).
+    figsize
+        Matplotlib figure size.
+    dpi
+        Output DPI.
+    color_values
+        Optional per-electrode values for color mapping (aligned to electrodes_df rows).
+    size_values
+        Optional per-electrode values for size mapping (aligned to electrodes_df rows).
+    cmap
+        Colormap name for `color_values`.
+    vmin, vmax
+        Optional color scale bounds.
+    size_min, size_max
+        Optional size scale bounds (for `size_values` mapping).
+    threshold
+        Threshold used to select "kept" electrodes. If None, all are kept.
+    threshold_mode
+        Comparison mode for thresholding ("ge", "gt", "le", "lt", ... depending on your enum).
+    threshold_on
+        Which values are thresholded: "auto" / "color" / "size".
+    marker
+        Matplotlib marker.
+    base_size
+        Default marker size for kept electrodes when no `size_values` provided.
+    highlight_size
+        Size used for highlighted electrodes.
+    annotate
+        Whether to annotate electrodes with names.
+    style
+        Styling configuration.
+    render_markers
+        If False, render only the underlay snapshots (still computes montages internally).
+    show_below_threshold
+        If True and `threshold` is not None, draw below-threshold electrodes as fixed-size dots.
+    below_threshold_size
+        Marker size for below-threshold dots.
+    below_threshold_alpha
+        Alpha for below-threshold dots.
+    below_threshold_color
+        Color for below-threshold dots.
+
+    Usage example
+    -------------
+        from pathlib import Path
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "name": ["A1'", "A2", "A3'", "A4"],
+                "x": [10, 12, -8, -10],
+                "y": [20, 18, 22, 19],
+                "z": [30, 28, 31, 27],
+            }
+        )
+
+        plot_electrodes_3d(
+            electrodes_df=df,
+            out_path=Path("electrodes.png"),
+            threshold=0.5,
+            color_values=[0.1, 0.9, 0.2, 0.7],
+            show_below_threshold=True,
+        )
+    """
+    import os
+    from pathlib import Path
+
+    import matplotlib
+    import numpy as np
+
+    matplotlib.use("Agg", force=True)
+    from matplotlib import pyplot as plt  # noqa: WPS433
+
     import mne  # noqa: WPS433
+    import pandas as pd  # noqa: WPS433
+
+    # =============================================================================
+    #                     ########################################
+    #                     #            CONSTANTS / SETUP          #
+    #                     ########################################
+    # =============================================================================
+    if not isinstance(out_path, Path):
+        out_path = Path(out_path)
 
     os.environ["PYVISTA_OFF_SCREEN"] = "true"
     mne.viz.set_3d_backend("pyvistaqt")
 
+    # =============================================================================
+    #                     ########################################
+    #                     #          INPUT VALIDATION / CLEAN     #
+    #                     ########################################
+    # =============================================================================
     cleaned_df = validate_and_clean_electrodes_df(electrodes_df, values_col=None)
     if cleaned_df.empty:
         raise ValueError("electrodes_df is empty after cleaning.")
@@ -96,16 +215,8 @@ def plot_electrodes_3d(
     names = cleaned_df["name"].astype(str).to_numpy()
     highlight_set = set(highlight or [])
 
-    color_arr = _as_aligned_float_array(
-        values=color_values,
-        expected_len=len(cleaned_df),
-        name="color_values",
-    )
-    size_arr = _as_aligned_float_array(
-        values=size_values,
-        expected_len=len(cleaned_df),
-        name="size_values",
-    )
+    color_arr = _as_aligned_float_array(values=color_values, expected_len=len(cleaned_df), name="color_values")
+    size_arr = _as_aligned_float_array(values=size_values, expected_len=len(cleaned_df), name="size_values")
 
     keep_mask = _compute_threshold_mask(
         n_electrodes=len(cleaned_df),
@@ -116,7 +227,7 @@ def plot_electrodes_3d(
         threshold_on=threshold_on,
     )
 
-    # If no threshold is set, treat everything as "kept"
+    # If no threshold is set, treat everything as kept.
     if threshold is None:
         keep_mask = np.ones(len(cleaned_df), dtype=bool)
 
@@ -132,18 +243,27 @@ def plot_electrodes_3d(
     size_kept = size_arr[keep_mask] if size_arr is not None else None
 
     names_below = names[below_mask]
-    xyz_m_below = xyz_m[below_mask]
+    xyz_m_below = xyz_m[below_mask]  # noqa: F841  (kept for readability/future debugging)
 
-    # IMPORTANT: montage must include ALL electrodes we might want to plot
-    # (otherwise snapshot_brain_montage won't return xy for below-threshold points)
-    ch_pos_all: dict[str, np.ndarray] = {
-        str(names[i]): xyz_m[i, :]
-        for i in range(len(names))
-    }
+    kept_set = set(names_kept.tolist())
+    below_set = set(names_below.tolist())
+
+    # =============================================================================
+    #                     ########################################
+    #                     #      MONTAGE FOR PROJECTION (ALL)     #
+    #                     ########################################
+    # =============================================================================
+    # IMPORTANT: montage must include ALL electrodes that may be projected in any view,
+    # otherwise snapshot_brain_montage won't return xy for below-threshold points.
+    ch_pos_all: dict[str, np.ndarray] = {str(names[i]): xyz_m[i, :] for i in range(len(names))}
     montage_all = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos_all)
 
+    # =============================================================================
+    #                     ########################################
+    #                     #          BRAIN UNDERLAY FIGURE        #
+    #                     ########################################
+    # =============================================================================
     subjects_dir = _get_fsaverage_subjects_dir(mne)
-
     brain_fig = _make_fsaverage_underlay_figure(
         mne=mne,
         subjects_dir=subjects_dir,
@@ -152,6 +272,11 @@ def plot_electrodes_3d(
     plotter = brain_fig.plotter
     _harden_plotter(plotter)
 
+    # =============================================================================
+    #                     ########################################
+    #                     #          MATPLOTLIB FIGURE SETUP      #
+    #                     ########################################
+    # =============================================================================
     _configure_matplotlib(style=style, dpi=int(dpi))
     fig2, axes = plt.subplots(2, 2, figsize=figsize)
     fig2.patch.set_facecolor("white")
@@ -174,13 +299,16 @@ def plot_electrodes_3d(
         size_max=size_max,
     )
 
+    # =============================================================================
+    #                     ########################################
+    #                     #               RENDER LOOP             #
+    #                     ########################################
+    # =============================================================================
     try:
         for i, view in enumerate(VIEWS_2X2):
             ax = axes[i // 2, i % 2]
 
-            print("BEFORE", view.name, brain_fig.plotter.camera_position)
-
-            # OLD LOGIC: let MNE choose stable camera params for this brain-only fig
+            # Reset -> set view -> render (order matters)
             _reset_camera_orientation(plotter)
             mne.viz.set_3d_view(
                 figure=brain_fig,
@@ -190,98 +318,111 @@ def plot_electrodes_3d(
                 distance="auto",
                 focalpoint="auto",
             )
+            plotter.render()
 
-            brain_fig.plotter.render()
-            print("AFTER ", view.name, brain_fig.plotter.camera_position)
-
-            keep_names = _names_for_view(all_names=names_kept, view_name=view.name)
-            if len(keep_names) == 0:
+            # Names to PROJECT for this view must be based on ALL electrodes
+            view_names_all = _names_for_view(all_names=names, view_name=view.name)
+            if len(view_names_all) == 0:
                 ax.set_axis_off()
                 continue
 
-            sub_montage = _subset_montage_by_names(montage=montage_all, keep_names=keep_names)
+            # Snapshot montage for this view (projection + underlay)
+            sub_montage = _subset_montage_by_names(montage=montage_all, keep_names=view_names_all)
             sub_pos = sub_montage.get_positions().get("ch_pos", {}) or {}
             if len(sub_pos) == 0:
                 ax.set_axis_off()
                 continue
 
-            plotter.render()
             xy, image = mne.viz.snapshot_brain_montage(
                 brain_fig,
                 sub_montage,
-                hide_sensors=False,
+                hide_sensors=False,  # critical: avoids hemi clipping edge-case
             )
             ax.imshow(image)
 
-            if render_markers:
+            if not render_markers:
+                ax.set_axis_off()
+                continue
 
-                name_to_xy = xy  # already a dict[str, tuple[float,float]]
+            name_to_xy = xy  # dict[str, tuple[float, float]]
 
-                # Plot below-threshold dots (fixed size, neutral color)
-                if show_below_threshold and np.any(below_mask):
-                    below_set = set(names_below.tolist())
-                    plotted_below = [n for n in keep_names if (n in below_set) and (n in name_to_xy)]
-                    if plotted_below:
-                        xy_below = np.vstack([name_to_xy[n] for n in plotted_below])
-                        ax.scatter(
-                            xy_below[:, 0],
-                            xy_below[:, 1],
-                            s=float(below_threshold_size),
-                            c=below_threshold_color,
-                            alpha=float(below_threshold_alpha),
-                            marker=marker,
-                            linewidths=0,
-                            zorder=2,
-                        )
-                plotted_names = [n for n in keep_names if n in xy]
-                if len(plotted_names) == 0:
-                    ax.set_axis_off()
-                    continue
-
-                xy_points = np.vstack([xy[n] for n in plotted_names])
-                name_to_index = {n: idx for idx, n in enumerate(names_kept.tolist())}
-
-                plotted_color = None
-                if color_kept is not None:
-                    plotted_color = np.array([color_kept[name_to_index[n]] for n in plotted_names], dtype=float)
-
-                plotted_sizes = None
-                if sizes_px is not None:
-                    plotted_sizes = np.array([sizes_px[name_to_index[n]] for n in plotted_names], dtype=float)
-
-                if plotted_color is None:
-                    _scatter_static_markers(
-                        ax=ax,
-                        xy_points=xy_points,
+            # ---------------------------------------------------------------------
+            # Below-threshold context dots (fixed size)
+            # ---------------------------------------------------------------------
+            if show_below_threshold and (threshold is not None) and np.any(below_mask):
+                plotted_below = [n for n in view_names_all if (n in below_set) and (n in name_to_xy)]
+                if plotted_below:
+                    xy_below = np.vstack([name_to_xy[n] for n in plotted_below])
+                    ax.scatter(
+                        xy_below[:, 0],
+                        xy_below[:, 1],
+                        s=float(below_threshold_size),
+                        c=below_threshold_color,
+                        alpha=float(below_threshold_alpha),
                         marker=marker,
-                        sizes=plotted_sizes,
-                        default_size=base_size,
-                    )
-                else:
-                    _scatter_value_markers(
-                        ax=ax,
-                        xy_points=xy_points,
-                        values=plotted_color,
-                        marker=marker,
-                        sizes=plotted_sizes,
-                        default_size=base_size,
-                        cmap=cmap,
-                        norm=color_norm,
+                        linewidths=0,
+                        zorder=2,
                     )
 
-                _scatter_highlights(
+            # ---------------------------------------------------------------------
+            # Kept electrodes (value-based or static markers)
+            # ---------------------------------------------------------------------
+            plotted_names = [n for n in view_names_all if (n in kept_set) and (n in name_to_xy)]
+            if len(plotted_names) == 0:
+                ax.set_axis_off()
+                continue
+
+            xy_points = np.vstack([name_to_xy[n] for n in plotted_names])
+
+            # Map name -> index within kept arrays (for color_kept / sizes_px)
+            name_to_index = {n: idx for idx, n in enumerate(names_kept.tolist())}
+
+            plotted_color = None
+            if color_kept is not None:
+                plotted_color = np.array([color_kept[name_to_index[n]] for n in plotted_names], dtype=float)
+
+            plotted_sizes = None
+            if sizes_px is not None:
+                plotted_sizes = np.array([sizes_px[name_to_index[n]] for n in plotted_names], dtype=float)
+
+            if plotted_color is None:
+                _scatter_static_markers(
                     ax=ax,
                     xy_points=xy_points,
-                    plotted_names=plotted_names,
-                    highlight_set=highlight_set,
-                    highlight_size=highlight_size,
+                    marker=marker,
+                    sizes=plotted_sizes,
+                    default_size=base_size,
+                )
+            else:
+                _scatter_value_markers(
+                    ax=ax,
+                    xy_points=xy_points,
+                    values=plotted_color,
+                    marker=marker,
+                    sizes=plotted_sizes,
+                    default_size=base_size,
+                    cmap=cmap,
+                    norm=color_norm,
                 )
 
-                if annotate:
-                    _annotate_points(ax=ax, xy_points=xy_points, names=plotted_names, font_size=style.font_size)
+            _scatter_highlights(
+                ax=ax,
+                xy_points=xy_points,
+                plotted_names=plotted_names,
+                highlight_set=highlight_set,
+                highlight_size=highlight_size,
+            )
+
+            if annotate:
+                _annotate_points(ax=ax, xy_points=xy_points, names=plotted_names, font_size=style.font_size)
 
             ax.set_axis_off()
 
+        # =============================================================================
+        #                     ########################################
+        #                     #               FINALIZE                #
+        #                     ########################################
+        # =============================================================================
         if render_markers and (color_scalar_mappable is not None):
             _add_colorbar(
                 fig=fig2,
@@ -293,9 +434,11 @@ def plot_electrodes_3d(
         fig2.tight_layout()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         fig2.savefig(out_path, dpi=int(dpi), facecolor="white")
+
     finally:
         plt.close(fig2)
         mne.viz.close_3d_figure(brain_fig)
+
 
 
 def _make_fsaverage_underlay_figure(*, mne, subjects_dir: Path, surface: str):
