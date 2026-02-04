@@ -30,7 +30,7 @@ from .views import VIEWS_2X2  # noqa
 #                     #               CONSTANTS               #
 #                     ########################################
 # =============================================================================
-DEFAULT_SURFACE = "white"
+DEFAULT_SURFACE = "pial"
 
 COLORBAR_RECT = (0.15, 0.05, 0.7, 0.02)  # (left, bottom, width, height)
 COLORBAR_ORIENTATION = "horizontal"
@@ -149,6 +149,8 @@ def plot_electrodes_3d(
         for i, view in enumerate(VIEWS_2X2):
             ax = axes[i // 2, i % 2]
 
+            print("BEFORE", view.name, brain_fig.plotter.camera_position)
+
             # OLD LOGIC: let MNE choose stable camera params for this brain-only fig
             _reset_camera_orientation(plotter)
             mne.viz.set_3d_view(
@@ -159,6 +161,9 @@ def plot_electrodes_3d(
                 distance="auto",
                 focalpoint="auto",
             )
+
+            brain_fig.plotter.render()
+            print("AFTER ", view.name, brain_fig.plotter.camera_position)
 
             keep_names = _names_for_view(all_names=names_kept, view_name=view.name)
             if len(keep_names) == 0:
@@ -175,7 +180,7 @@ def plot_electrodes_3d(
             xy, image = mne.viz.snapshot_brain_montage(
                 brain_fig,
                 sub_montage,
-                hide_sensors=True,
+                hide_sensors=False,
             )
             ax.imshow(image)
 
@@ -262,7 +267,7 @@ def _make_fsaverage_underlay_figure(*, mne, subjects_dir: Path, surface: str):
         subjects_dir=subjects_dir,
         surfaces=surface,
     )
-    print("Plotter bounds:", fig.plotter.bounds)
+
     return fig
 
 
