@@ -188,8 +188,10 @@ def get_trigger_id(dcap_id: str, run: str) -> int:
 
 def infer_bids_root_from_written_file(written_file: Path) -> Path:
     """Infer BIDS root from a file path like <bids_root>/sub-XXX/..."""
-    for parent in [written_file, *written_file.parents]:
-        if parent.name.startswith("sub-"):
-            return parent.parent
+    parts = written_file.parts
+    for idx, part in enumerate(parts):
+        if part.startswith("sub-"):
+            return Path(*parts[:idx])  # everything before sub-XXX
     raise ValueError(f"Could not infer BIDS root from path: {written_file}")
+
 

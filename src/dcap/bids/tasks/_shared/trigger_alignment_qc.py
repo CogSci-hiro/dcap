@@ -54,7 +54,7 @@ def write_trigger_alignment_qc_json(
     """
     ensure_dcap_qc_dataset_description(bids_root=bids_root, dcap_version=dcap_version)
 
-    out_dir = bids_root / "derivatives" / "dcap-qc" / subject
+    out_dir = bids_root / "derivatives" / "dcap-qc" / f"sub-{subject}"
     if session is not None:
         out_dir = out_dir / session
     out_dir = out_dir / datatype
