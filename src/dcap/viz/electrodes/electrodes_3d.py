@@ -75,6 +75,10 @@ def plot_electrodes_3d(
     annotate: bool = False,
     style: StyleConfig = DEFAULT_STYLE,
     render_markers: bool = True,  # NEW: backward-compatible testing hook
+    show_below_threshold: bool = False,
+    below_threshold_size: float = 5.0,
+    below_threshold_alpha: float = 0.2,
+    below_threshold_color: str = "#888888",
 ) -> None:
     import mne  # noqa: WPS433
 
@@ -92,8 +96,16 @@ def plot_electrodes_3d(
     names = cleaned_df["name"].astype(str).to_numpy()
     highlight_set = set(highlight or [])
 
-    color_arr = _as_aligned_float_array(values=color_values, expected_len=len(cleaned_df), name="color_values")
-    size_arr = _as_aligned_float_array(values=size_values, expected_len=len(cleaned_df), name="size_values")
+    color_arr = _as_aligned_float_array(
+        values=color_values,
+        expected_len=len(cleaned_df),
+        name="color_values",
+    )
+    size_arr = _as_aligned_float_array(
+        values=size_values,
+        expected_len=len(cleaned_df),
+        name="size_values",
+    )
 
     keep_mask = _compute_threshold_mask(
         n_electrodes=len(cleaned_df),
@@ -103,21 +115,35 @@ def plot_electrodes_3d(
         threshold_mode=threshold_mode,
         threshold_on=threshold_on,
     )
+
+    # If no threshold is set, treat everything as "kept"
+    if threshold is None:
+        keep_mask = np.ones(len(cleaned_df), dtype=bool)
+
+    below_mask = ~keep_mask
+
     if not np.any(keep_mask):
         raise ValueError("Thresholding removed all electrodes; nothing to plot.")
 
+    # Split arrays (kept vs below-threshold)
     names_kept = names[keep_mask]
     xyz_m_kept = xyz_m[keep_mask]
     color_kept = color_arr[keep_mask] if color_arr is not None else None
     size_kept = size_arr[keep_mask] if size_arr is not None else None
 
-    # montage used ONLY for snapshot projection (NOT for brain fig / camera)
-    ch_pos_all = {str(name): xyz_m_kept[i, :] for i, name in enumerate(names_kept)}
+    names_below = names[below_mask]
+    xyz_m_below = xyz_m[below_mask]
+
+    # IMPORTANT: montage must include ALL electrodes we might want to plot
+    # (otherwise snapshot_brain_montage won't return xy for below-threshold points)
+    ch_pos_all: dict[str, np.ndarray] = {
+        str(names[i]): xyz_m[i, :]
+        for i in range(len(names))
+    }
     montage_all = _make_dig_montage_mni_tal_compat(ch_pos_m=ch_pos_all)
 
     subjects_dir = _get_fsaverage_subjects_dir(mne)
 
-    # NEW: brain-only underlay figure (montage-free)
     brain_fig = _make_fsaverage_underlay_figure(
         mne=mne,
         subjects_dir=subjects_dir,
@@ -129,7 +155,10 @@ def plot_electrodes_3d(
     _configure_matplotlib(style=style, dpi=int(dpi))
     fig2, axes = plt.subplots(2, 2, figsize=figsize)
     fig2.patch.set_facecolor("white")
-    fig2.suptitle(title or _default_title(coords_label=coords_space), fontsize=max(12, style.font_size + 2))
+    fig2.suptitle(
+        title or _default_title(coords_label=coords_space),
+        fontsize=max(12, style.font_size + 2),
+    )
 
     color_norm, color_scalar_mappable = _prepare_color_mapping(
         color_values=color_kept,
@@ -185,6 +214,25 @@ def plot_electrodes_3d(
             ax.imshow(image)
 
             if render_markers:
+
+                name_to_xy = xy  # already a dict[str, tuple[float,float]]
+
+                # Plot below-threshold dots (fixed size, neutral color)
+                if show_below_threshold and np.any(below_mask):
+                    below_set = set(names_below.tolist())
+                    plotted_below = [n for n in keep_names if (n in below_set) and (n in name_to_xy)]
+                    if plotted_below:
+                        xy_below = np.vstack([name_to_xy[n] for n in plotted_below])
+                        ax.scatter(
+                            xy_below[:, 0],
+                            xy_below[:, 1],
+                            s=float(below_threshold_size),
+                            c=below_threshold_color,
+                            alpha=float(below_threshold_alpha),
+                            marker=marker,
+                            linewidths=0,
+                            zorder=2,
+                        )
                 plotted_names = [n for n in keep_names if n in xy]
                 if len(plotted_names) == 0:
                     ax.set_axis_off()
