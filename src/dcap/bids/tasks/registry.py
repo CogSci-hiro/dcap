@@ -126,7 +126,7 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
         # Optional: fail fast with helpful errors
         _require_file(audio_onsets_tsv, "audio_onsets.tsv")
         _require_file(stim_wav, "stim wav")
-        _require_file(atlas_path, "elec2atlas.mat")
+        _require_file(task_assets_dir / dcap_id, "elec2atlas.mat")
 
         return DiapixTask(
             bids_subject=ctx.bids_subject,

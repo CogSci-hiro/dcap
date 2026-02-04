@@ -23,6 +23,7 @@ from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.converter import convert_subject
 from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
 from dcap.registry.validate import resolve_private_root
+from dcap.bids.core.subject_mapping import load_subject_mapping_entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,10 +152,29 @@ def run(args: argparse.Namespace) -> int:
 
     private_root = resolve_private_root(str(cfg.private_root_path))
 
+    # Resolve subject mapping YAML (if user didn’t pass it explicitly, default under private_root)
+    subject_map_yaml = cfg.subject_map_yaml
+    if subject_map_yaml is None:
+        subject_map_yaml = private_root / "subject_keys.yaml"  # adjust filename if yours differs
+
+    entry = load_subject_mapping_entry(
+        mapping_yaml=subject_map_yaml,
+        dataset_id=cfg.dataset_id,
+        bids_subject=cfg.bids_subject,
+    )
+    dcap_id = entry.original_id
+
+    resolved_source_root = cfg.source_root / dcap_id
+    if not resolved_source_root.exists():
+        raise FileNotFoundError(
+            f"Resolved source_root does not exist: {resolved_source_root} "
+            f"(source_root={cfg.source_root}, dcap_id={dcap_id})"
+        )
+
     core_cfg = BidsCoreConfig(
-        source_root=cfg.source_root,
+        source_root=resolved_source_root,
         bids_root=cfg.bids_root,
-        subject=cfg.bids_subject,   # core will normalize sub- prefix etc.
+        subject=cfg.bids_subject,
         session=cfg.session,
         datatype=cfg.datatype,
         overwrite=cfg.overwrite,

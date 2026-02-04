@@ -169,13 +169,26 @@ def _compute_delay_seconds(*,
     wav_onsets, wav_intervals = _get_wav_trigger_onsets_and_intervals(stim_wav=stim_wav)
     raw_onsets, raw_intervals = _get_raw_trigger_onsets_and_intervals(raw_trigger_events=raw_trigger_events, sfreq=sfreq)
 
-    return _match_intervals_delay_mad(
-        raw_onsets=raw_onsets,
-        raw_intervals=raw_intervals,
-        wav_onsets=wav_onsets,
-        wav_intervals=wav_intervals,
-        tolerance=0.005,
-    ), wav_onsets, raw_onsets
+    tolerance = 1.0 / sfreq
+
+    try:
+        delay_s = _match_intervals_delay_mad(
+            raw_onsets=raw_onsets,
+            raw_intervals=raw_intervals,
+            wav_onsets=wav_onsets,
+            wav_intervals=wav_intervals,
+            tolerance=tolerance,
+        )
+    except ValueError:
+        # Fallback: onset-only matching (handles missing/extra triggers)
+        delay_s = _estimate_delay_by_onset_hits(
+            wav_onsets=wav_onsets,
+            raw_onsets=raw_onsets,
+            max_offset=30,
+            match_tol_s=max(2.0 * tolerance, 0.01),
+        )
+
+    return delay_s, wav_onsets, raw_onsets
 
 
 def _match_intervals_delay_mad(
@@ -224,11 +237,23 @@ def _match_intervals_delay_mad(
     best_raw_start = None
     best_delay = None
 
+    best_rmse_any = float("inf")
+    best_wav_start_any = None
+    best_raw_start_any = None
+    best_delay_any = None
+
     for wav_start in range(max_wav_start + 1):
         wav_win = wav_intervals[wav_start: wav_start + window_len]
         for raw_start in range(max_raw_start + 1):
             raw_win = raw_intervals[raw_start: raw_start + window_len]
             rmse = float(np.sqrt(np.mean((wav_win - raw_win) ** 2)))
+
+            # Track best RMSE candidate regardless of tolerance (fallback)
+            if rmse < best_rmse_any:
+                best_rmse_any = rmse
+                best_wav_start_any = wav_start
+                best_raw_start_any = raw_start
+                best_delay_any = float(raw_onsets[raw_start] - wav_onsets[wav_start])
 
             # Reject bad interval matches early
             if rmse > tolerance:
@@ -253,9 +278,19 @@ def _match_intervals_delay_mad(
                 best_delay = delay
 
     if best_wav_start is None or best_raw_start is None or best_delay is None:
-        raise ValueError(
-            "Could not find an interval alignment that also yields consistent onset alignment."
-        )
+        if best_wav_start_any is None or best_raw_start_any is None or best_delay_any is None:
+            raise ValueError("Could not find any interval alignment candidate.")
+
+        # Safety guard: don't accept a garbage match silently
+        if best_rmse_any > 5.0 * tolerance:
+            raise ValueError(
+                "Could not find an interval alignment that also yields consistent onset alignment, "
+                f"and best available RMSE is too high (rmse={best_rmse_any:.6f}, tol={tolerance:.6f})."
+            )
+
+        best_wav_start = best_wav_start_any
+        best_raw_start = best_raw_start_any
+        best_delay = best_delay_any
 
     wav_idx = int(best_wav_start)
     raw_idx = int(best_raw_start)
@@ -308,3 +343,58 @@ def _count_onset_matches(
             j += 1
 
     return hits
+
+
+def _estimate_delay_by_onset_hits(
+    *,
+    wav_onsets: np.ndarray,
+    raw_onsets: np.ndarray,
+    max_offset: int,
+    match_tol_s: float,
+) -> float:
+    if wav_onsets.size == 0 or raw_onsets.size == 0:
+        raise ValueError("Empty onset sequence; cannot estimate delay.")
+
+    max_wav = int(min(max_offset, wav_onsets.size - 1))
+    max_raw = int(min(max_offset, raw_onsets.size - 1))
+
+    best_hits = -1
+    best_delay = None
+
+    for i in range(max_wav + 1):
+        for j in range(max_raw + 1):
+            delay = float(raw_onsets[j] - wav_onsets[i])
+            hits = _count_onset_matches(
+                wav_onsets_s=wav_onsets,
+                raw_onsets_s=raw_onsets,
+                delay_s=delay,
+                match_tol_s=match_tol_s,
+            )
+            if hits > best_hits:
+                best_hits = hits
+                best_delay = delay
+
+    if best_delay is None or best_hits <= 0:
+        raise ValueError("Could not estimate delay from onset matches (no matches found).")
+
+    # Refine using matched pairs under best delay: take robust median of diffs.
+    shifted = wav_onsets + best_delay
+    i = 0
+    j = 0
+    diffs: list[float] = []
+    while i < shifted.size and j < raw_onsets.size:
+        dt = float(shifted[i] - raw_onsets[j])
+        if abs(dt) <= match_tol_s:
+            diffs.append(float(raw_onsets[j] - wav_onsets[i]))
+            i += 1
+            j += 1
+        elif dt < -match_tol_s:
+            i += 1
+        else:
+            j += 1
+
+    if len(diffs) == 0:
+        return float(best_delay)
+
+    return float(np.median(np.asarray(diffs, dtype=float)))
+
