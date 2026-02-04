@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dcap.bids.core.anat import AnatWriteConfig, write_anat_and_derivatives
+from dcap.bids.core.subject_mapping import load_subject_mapping_entry
 
 
 def add_subparser(subparsers: Any) -> None:
@@ -27,9 +28,12 @@ def add_subparser(subparsers: Any) -> None:
     parser.add_argument("--bids-root", type=Path, required=True)
     parser.add_argument("--bids-subject", type=str, required=True, help='BIDS subject label, e.g. "sub-001" or "001".')
     parser.add_argument("--session", type=str, default=None, help='Optional session label, e.g. "01" or "ses-01".')
+    parser.add_argument("--dataset-id", type=str, required=True,
+                        help="Dataset identifier used in the subject mapping YAML.")
+    parser.add_argument("--mapping-yaml", type=Path, required=True,
+                        help="YAML mapping file with bids_subject -> original_id.")
 
     parser.add_argument("--subjects-dir", type=Path, required=True, help="FreeSurfer SUBJECTS_DIR")
-    parser.add_argument("--original-id", type=str, required=True, help="FreeSurfer subject folder name (often private).")
 
     parser.add_argument("--deface", action="store_true", help="Deface T1w during write.")
     parser.add_argument("--no-copy-elec-recon", action="store_true", help="Do not copy elec_recon to derivatives.")
@@ -65,9 +69,15 @@ def run(args: argparse.Namespace) -> None:
     bids_subject_bare = _strip_prefix(str(args.bids_subject), "sub")
     session_bare = _strip_prefix(str(args.session), "ses") if args.session is not None else None
 
+    entry = load_subject_mapping_entry(
+        mapping_yaml=Path(args.mapping_yaml),
+        dataset_id=str(args.dataset_id).strip(),
+        bids_subject=str(args.bids_subject),
+    )
+
     cfg = AnatWriteConfig(
         subjects_dir=Path(args.subjects_dir).expanduser().resolve(),
-        original_id=str(args.original_id).strip(),
+        original_id=entry.original_id,
         bids_root=Path(args.bids_root).expanduser().resolve(),
         bids_subject=bids_subject_bare,
         session=session_bare,
