@@ -20,7 +20,7 @@ class MNEViewSpec:
 
 
 TOP_VIEW = MNEViewSpec(name="Top", azimuth=0.0, elevation=0.0, roll=0.0)
-FRONT_VIEW = MNEViewSpec(name="Front", azimuth=90.0, elevation=90.0, roll=125.0)
+FRONT_VIEW = MNEViewSpec(name="Front", azimuth=90.0, elevation=90.0, roll=2.0)  # looks more level with this
 RIGHT_VIEW = MNEViewSpec(name="Right", azimuth=0.0, elevation=90.0, roll=-90.0)
 LEFT_VIEW = MNEViewSpec(name="Left", azimuth=0.0, elevation=-90.0, roll=90.0)
 
