@@ -72,6 +72,8 @@ from scipy.signal import hilbert
 from dcap.analysis.trf.design_matrix import LagConfig
 from dcap.analysis.trf.fit import fit_trf_ridge, predict_trf
 from dcap.viz.electrodes.electrodes_3d import plot_electrodes_3d
+from sklearn.model_selection import KFold
+
 
 
 # =============================================================================
@@ -92,14 +94,21 @@ BROADBAND_HFREQ_HZ: float = 30.0
 HIGHGAMMA_LFREQ_HZ: float = 70.0
 HIGHGAMMA_HFREQ_HZ: float = 150.0
 
-K_FOLDS: int = 10  # runs-fold CV; if n_runs < K_FOLDS, we use LORO
-ALPHAS: np.ndarray = np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
+CV_ALONG_TIME: bool = True
 
-TMIN_MS: float = -1000.0
-TMAX_MS: float = 1000.0
+TIME_K_FOLDS: int = 10          # number of folds over time blocks
+TIME_N_BLOCKS: int = 10        # split the full time series into this many contiguous blocks
+TIME_SHUFFLE: bool = False     # MUST be False for contiguous behavior
+TIME_RANDOM_STATE: int = 0
+
+
+ALPHAS: np.ndarray = np.logspace(-6, 6, 10)  # np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
+
+TMIN_MS: float = -500.0
+TMAX_MS: float = 500.0
 LAG_STEP_MS: float = 1000.0 / SFREQ_OUT_HZ  # 1 sample at 128 Hz
 
-SCORE_METRIC: Literal["r2"] = "corr"
+SCORE_METRIC: Literal["r2"] = "r2"
 
 SeegCond = Literal["broadband", "highgamma"]
 StimCond = Literal["both", "self", "other"]
@@ -107,9 +116,15 @@ StimCond = Literal["both", "self", "other"]
 CROP_EVENT_START: str = "conversation_start"
 CROP_EVENT_END: str = "conversation_end"
 CROP_EXPECTED_DURATION_S: float = 240.0  # 4 minutes
-CROP_TOLERANCE_S: float = 1.0            # allow small annotation jitter
+CROP_TOLERANCE_S: float = .01            # allow small annotation jitter
 
-THRESHOLD = 0.001
+THRESHOLD = 0.0005
+
+SPEECH_ENV_LP_HZ: float = 15.0          # common choice: 8 Hz (syllabic-rate-ish)
+SPEECH_ENV_LP_TRANS_BW_HZ: float = 2.0 # transition band
+
+# Gap to prevent TRF lag leakage (seconds). Use >= max(|tmin|, |tmax|); conservative is max lag.
+CV_GAP_S: float = max(abs(TMIN_MS), abs(TMAX_MS)) / 1000.0
 
 
 # =============================================================================
@@ -369,8 +384,16 @@ def preprocess_audio_envelopes(audio_stereo: np.ndarray, *, sfreq_in: float) -> 
     envs: Dict[StimCond, np.ndarray] = {}
     for cond, sig in signals.items():
         env = hilbert_envelope_1d(sig.astype(np.float64))
-        env_rs = mne.filter.resample(env, down=sfreq_in, up=SFREQ_OUT_HZ, npad="auto")
+
+        # Low-pass the envelope (before resampling)
+        env_lp = lowpass_1d(env, sfreq=sfreq_in, lpf_hz=SPEECH_ENV_LP_HZ)
+
+        # Downsample to TRF rate
+        env_rs = mne.filter.resample(env_lp, down=sfreq_in, up=SFREQ_OUT_HZ, npad="auto")
+
+        # Z-score per run
         envs[cond] = zscore(env_rs.reshape(-1, 1), axis=0).ravel()
+
     return envs
 
 
@@ -438,73 +461,71 @@ def make_run_folds(n_runs: int, k_folds: int) -> List[Tuple[np.ndarray, np.ndarr
     return folds
 
 
-def cv_r2_alpha_search_single(
-    X_ep: np.ndarray,
-    Y_ep: np.ndarray,
+def cv_r2_alpha_search_time_kfold(
+    X: np.ndarray,            # (n_time, 1)
+    Y: np.ndarray,            # (n_time, n_ch)
     *,
     sfreq: float,
     lag_config: LagConfig,
     alphas: np.ndarray,
     k_folds: int,
+    n_blocks: int,
+    gap_s: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Single CV across runs with alpha search (non-nested).
-
-    Steps
-    -----
-    1) For each fold, for each alpha:
-         - fit on train runs
-         - score on test runs (R² per channel)
-    2) Choose best alpha per channel using mean R² across folds:
-         alpha*_c = argmax_alpha mean_folds R²(alpha, fold, c)
-    3) Report fold-wise R² for each channel at its chosen alpha.
+    Single CV along TIME using sklearn KFold over contiguous time blocks.
+    Alpha selection is per-channel using mean CV R² across folds.
 
     Returns
     -------
-    r2_by_fold_by_ch : ndarray
-        Shape (n_folds, n_channels) using chosen alpha per channel.
-    best_alpha_by_ch : ndarray
-        Shape (n_channels,)
-    r2_by_alpha_by_fold_by_ch : ndarray
-        Shape (n_alphas, n_folds, n_channels) (full diagnostic grid)
-
-    Usage example
-    -------------
-        r2_folds, alpha_ch, grid = cv_r2_alpha_search_single(X_ep, Y_ep, sfreq=128, lag_config=lags, alphas=ALPHAS, k_folds=4)
+    r2_by_fold_by_ch : (k_folds, n_ch)
+    best_alpha_by_ch : (n_ch,)
+    r2_grid : (n_alphas, k_folds, n_ch)
     """
-    if X_ep.ndim != 3 or Y_ep.ndim != 3:
-        raise ValueError("X_ep and Y_ep must be 3D: (time, run, feature/output).")
+    if X.ndim != 2 or Y.ndim != 2:
+        raise ValueError("X must be (time, features) and Y must be (time, channels).")
+    if X.shape[0] != Y.shape[0]:
+        raise ValueError("X and Y must have the same n_time.")
 
-    n_times, n_runs, _ = X_ep.shape
-    _, _, n_ch = Y_ep.shape
-
-    folds = make_run_folds(n_runs=n_runs, k_folds=k_folds)
-    n_folds = len(folds)
+    n_time = X.shape[0]
+    n_ch = Y.shape[1]
     n_alphas = int(alphas.size)
 
-    r2_grid = np.zeros((n_alphas, n_folds, n_ch), dtype=np.float64)
+    block_id = make_time_blocks(n_samples=n_time, n_blocks=n_blocks)
+    unique_blocks = np.unique(block_id)
 
-    for fi, (train_idx, test_idx) in enumerate(folds):
-        X_train = X_ep[:, train_idx, :]
-        Y_train = Y_ep[:, train_idx, :]
-        X_test = X_ep[:, test_idx, :]
-        Y_test = Y_ep[:, test_idx, :]
+    if k_folds > unique_blocks.size:
+        raise ValueError(f"k_folds={k_folds} > n_blocks={unique_blocks.size}. Reduce k or increase blocks.")
+
+    kf = KFold(n_splits=k_folds, shuffle=TIME_SHUFFLE, random_state=TIME_RANDOM_STATE if TIME_SHUFFLE else None)
+
+    r2_grid = np.zeros((n_alphas, k_folds, n_ch), dtype=np.float64)
+
+    for fold_i, (train_blocks_idx, test_blocks_idx) in enumerate(kf.split(unique_blocks)):
+        train_blocks = set(unique_blocks[train_blocks_idx].tolist())
+        test_blocks = set(unique_blocks[test_blocks_idx].tolist())
+
+        train_mask = np.array([b in train_blocks for b in block_id], dtype=bool)
+        test_mask = np.array([b in test_blocks for b in block_id], dtype=bool)
+
+        # IMPORTANT: gap to prevent TRF lag leakage across boundaries
+        train_mask = apply_gap_to_train_mask(train_mask=train_mask, test_mask=test_mask, gap_s=gap_s, sfreq=sfreq)
+
+        X_train = X[train_mask, :]
+        Y_train = Y[train_mask, :]
+        X_test = X[test_mask, :]
+        Y_test = Y[test_mask, :]
 
         for ai, a in enumerate(alphas):
             fit = fit_trf_ridge(X_train, Y_train, sfreq=sfreq, lag_config=lag_config, alpha=float(a))
             Y_hat = predict_trf(X_test, fit)
-
-            # If test has multiple runs, score by concatenating time across runs
-            y_true = Y_test.reshape(-1, n_ch)
-            y_pred = Y_hat.reshape(-1, n_ch)
-            r2_grid[ai, fi, :] = r2_per_channel(y_true, y_pred)
+            r2_grid[ai, fold_i, :] = r2_per_channel(Y_test, Y_hat)
 
     mean_r2_by_alpha_by_ch = np.mean(r2_grid, axis=1)  # (n_alphas, n_ch)
     best_idx = np.argmax(mean_r2_by_alpha_by_ch, axis=0)
     best_alpha_by_ch = alphas[best_idx].astype(np.float64)
 
-    # Extract fold-wise r2 at chosen alpha per channel
-    r2_folds = np.zeros((n_folds, n_ch), dtype=np.float64)
+    r2_folds = np.zeros((k_folds, n_ch), dtype=np.float64)
     for ch_i in range(n_ch):
         r2_folds[:, ch_i] = r2_grid[best_idx[ch_i], :, ch_i]
 
@@ -562,6 +583,7 @@ def save_electrode_plot(
         coords_space=coords_space,
         title=title,
         color_values=color_values,
+        size_values=np.abs(color_values),
         vmin=THRESHOLD,
         vmax=vmax_used,
         threshold=THRESHOLD
@@ -660,16 +682,23 @@ def run_subject(cfg: PipelineConfig, subject: str) -> pd.DataFrame:
             x_runs = trim_all_to_min_len([x.reshape(-1, 1) for x in x_runs])
             n_time2 = min(n_time, x_runs[0].shape[0])
 
-            X_ep = np.stack([x[:n_time2, :] for x in x_runs], axis=1)  # (time, run, 1)
-            Y_ep2 = Y_ep[:n_time2, :, :]
+            X_cat = concatenate_runs_1d(env_by_cond[stim_cond]).reshape(-1, 1)  # (time_total, 1)
+            Y_cat = concatenate_runs_2d(seeg_by_cond[seeg_cond])  # (time_total, n_ch)
 
-            r2_folds, alpha_by_ch, _grid = cv_r2_alpha_search_single(
-                X_ep=X_ep,
-                Y_ep=Y_ep2,
+            # Make sure they match
+            nmin = min(X_cat.shape[0], Y_cat.shape[0])
+            X_cat = X_cat[:nmin, :]
+            Y_cat = Y_cat[:nmin, :]
+
+            r2_folds, alpha_by_ch, _grid = cv_r2_alpha_search_time_kfold(
+                X=X_cat,
+                Y=Y_cat,
                 sfreq=SFREQ_OUT_HZ,
                 lag_config=lag_config,
                 alphas=ALPHAS,
-                k_folds=K_FOLDS,
+                k_folds=TIME_K_FOLDS,
+                n_blocks=TIME_N_BLOCKS,
+                gap_s=CV_GAP_S,
             )
             r2_mean = np.mean(r2_folds, axis=0)
 
@@ -797,6 +826,84 @@ def crop_raw_to_conversation(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
     raw_cropped = raw.copy().crop(tmin=start_t, tmax=end_t, include_tmax=False)
     return raw_cropped
 
+
+def lowpass_1d(x: np.ndarray, *, sfreq: float, lpf_hz: float) -> np.ndarray:
+    """
+    Zero-phase low-pass using MNE FIR filter.
+
+    Parameters
+    ----------
+    x
+        Shape (n_times,)
+    sfreq
+        Sampling rate of x (Hz)
+    lpf_hz
+        Low-pass cutoff (Hz)
+
+    Returns
+    -------
+    x_filt
+        Shape (n_times,)
+    """
+    if lpf_hz <= 0:
+        return x
+    nyq = sfreq / 2.0
+    if lpf_hz >= nyq:
+        return x
+    return mne.filter.filter_data(
+        x.astype(np.float64),
+        sfreq=float(sfreq),
+        l_freq=None,
+        h_freq=float(lpf_hz),
+        verbose=False,
+    ).astype(np.float64)
+
+
+def concatenate_runs_1d(x_runs: Sequence[np.ndarray]) -> np.ndarray:
+    return np.concatenate([x.reshape(-1) for x in x_runs], axis=0)
+
+def concatenate_runs_2d(y_runs: Sequence[np.ndarray]) -> np.ndarray:
+    return np.concatenate([y for y in y_runs], axis=0)
+
+
+def make_time_blocks(n_samples: int, n_blocks: int) -> np.ndarray:
+    """
+    Assign each sample to a contiguous block id in [0, n_blocks-1].
+    """
+    if n_blocks < 2:
+        raise ValueError("n_blocks must be >= 2")
+    # contiguous split points
+    edges = np.linspace(0, n_samples, n_blocks + 1, dtype=int)
+    block_id = np.empty(n_samples, dtype=int)
+    for bi in range(n_blocks):
+        block_id[edges[bi]:edges[bi + 1]] = bi
+    return block_id
+
+
+def apply_gap_to_train_mask(
+    *,
+    train_mask: np.ndarray,
+    test_mask: np.ndarray,
+    gap_s: float,
+    sfreq: float,
+) -> np.ndarray:
+    """
+    Remove samples within +/- gap_s of the test region from the training mask.
+    """
+    gap_n = int(round(gap_s * sfreq))
+    if gap_n <= 0:
+        return train_mask
+
+    test_idx = np.flatnonzero(test_mask)
+    if test_idx.size == 0:
+        return train_mask
+
+    # Expand test region by gap on both sides
+    start = max(int(test_idx.min()) - gap_n, 0)
+    end = min(int(test_idx.max()) + gap_n + 1, train_mask.size)
+    train_mask2 = train_mask.copy()
+    train_mask2[start:end] = False
+    return train_mask2
 
 
 if __name__ == "__main__":
