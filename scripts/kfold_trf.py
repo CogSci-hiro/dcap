@@ -75,6 +75,13 @@ from dcap.viz.electrodes.electrodes_3d import plot_electrodes_3d
 from sklearn.model_selection import KFold
 
 
+import inspect
+from typing import Any
+
+from dcap.seeg.preprocessing.blocks.rereference import rereference as dcap_rereference
+from dcap.seeg.preprocessing.configs import RereferenceConfig
+from dcap.seeg.preprocessing.types import PreprocContext
+
 
 # =============================================================================
 #                     ########################################
@@ -102,10 +109,10 @@ TIME_SHUFFLE: bool = False     # MUST be False for contiguous behavior
 TIME_RANDOM_STATE: int = 0
 
 
-ALPHAS: np.ndarray = np.logspace(-6, 6, 10)  # np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
+ALPHAS: np.ndarray = np.logspace(-6, 6, 30)  # np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
 
-TMIN_MS: float = -500.0
-TMAX_MS: float = 500.0
+TMIN_MS: float = -1000.0
+TMAX_MS: float = 1000.0
 LAG_STEP_MS: float = 1000.0 / SFREQ_OUT_HZ  # 1 sample at 128 Hz
 
 SCORE_METRIC: Literal["r2"] = "r2"
@@ -118,7 +125,7 @@ CROP_EVENT_END: str = "conversation_end"
 CROP_EXPECTED_DURATION_S: float = 240.0  # 4 minutes
 CROP_TOLERANCE_S: float = .01            # allow small annotation jitter
 
-THRESHOLD = 0.0005
+THRESHOLD = 0.005
 
 SPEECH_ENV_LP_HZ: float = 15.0          # common choice: 8 Hz (syllabic-rate-ish)
 SPEECH_ENV_LP_TRANS_BW_HZ: float = 2.0 # transition band
@@ -126,6 +133,21 @@ SPEECH_ENV_LP_TRANS_BW_HZ: float = 2.0 # transition band
 # Gap to prevent TRF lag leakage (seconds). Use >= max(|tmin|, |tmax|); conservative is max lag.
 CV_GAP_S: float = max(abs(TMIN_MS), abs(TMAX_MS)) / 1000.0
 
+# Rereferencing (DCAP block)
+DO_REREFERENCE: bool = True
+
+# Which view from the DCAP rereference block to use for downstream filtering
+# Available keys include: "original", "car", "bipolar", "wm_ref", "laplacian" (depending on cfg.methods)
+REREF_VIEW_KEY: str = "original"
+
+# Configure reref methods. Keep this minimal for now.
+REREF_METHODS: tuple[str, ...] = ("original")
+
+# CAR options (used if "car" in REREF_METHODS)
+REREF_CAR_SCOPE: str = "global"   # or "by_shaft" (uses geometry or name parsing)
+
+# Optional extras (only used if present in your config dataclass)
+REREF_LAPLACIAN_MODE: str = "shaft_1d"  # only meaningful if "laplacian" in methods
 
 # =============================================================================
 #                     ########################################
@@ -630,6 +652,8 @@ def run_subject(cfg: PipelineConfig, subject: str) -> pd.DataFrame:
         raw = load_raw_ieeg_bids(cfg.bids_root, subject, run, task=cfg.task)
         raw = crop_raw_to_conversation(raw)
 
+        raw = apply_dcap_rereference(raw)
+
         y_bb, ch_names = preprocess_seeg_branch(raw, branch="broadband")
         y_hg, ch_names_hg = preprocess_seeg_branch(raw, branch="highgamma")
 
@@ -904,6 +928,81 @@ def apply_gap_to_train_mask(
     train_mask2 = train_mask.copy()
     train_mask2[start:end] = False
     return train_mask2
+
+
+
+
+
+def _build_preproc_context() -> PreprocContext:
+    """
+    Build PreprocContext in a version-tolerant way.
+
+    We try to construct it with no args; if your dataclass evolves, we fall back
+    to providing None/defaults where possible.
+    """
+    try:
+        return PreprocContext()
+    except TypeError:
+        # Introspection fallback for dataclass signature changes
+        sig = inspect.signature(PreprocContext)
+        kwargs: dict[str, Any] = {}
+        for name, param in sig.parameters.items():
+            if param.default is not inspect._empty:
+                continue
+            # Required field with no default -> set to None (most DCAP contexts accept this)
+            kwargs[name] = None
+        return PreprocContext(**kwargs)
+
+
+def _build_rereference_config() -> RereferenceConfig:
+    """
+    Build RereferenceConfig in a version-tolerant way.
+
+    We fill in only parameters that exist in the config dataclass.
+    """
+    sig = inspect.signature(RereferenceConfig)
+    params = set(sig.parameters.keys())
+
+    kwargs: dict[str, Any] = {}
+
+    # Most important: methods list/tuple
+    if "methods" in params:
+        kwargs["methods"] = list(REREF_METHODS)
+    elif "method" in params:
+        # older style
+        kwargs["method"] = list(REREF_METHODS)
+
+    # CAR scope
+    if "car_scope" in params:
+        kwargs["car_scope"] = REREF_CAR_SCOPE
+
+    # Laplacian options (only if relevant + present)
+    if "laplacian_mode" in params:
+        kwargs["laplacian_mode"] = REREF_LAPLACIAN_MODE
+
+    return RereferenceConfig(**kwargs)
+
+
+def apply_dcap_rereference(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
+    """
+    Apply DCAP rereference block and return the selected view.
+
+    Raises loudly if the requested view isn't produced (good for pipeline safety).
+    """
+    if not DO_REREFERENCE:
+        return raw
+
+    cfg = _build_rereference_config()
+    ctx = _build_preproc_context()
+
+    views, _artifact = dcap_rereference(raw=raw, cfg=cfg, ctx=ctx)
+
+    if REREF_VIEW_KEY not in views:
+        raise KeyError(
+            f"Requested REREF_VIEW_KEY={REREF_VIEW_KEY!r} but available views are: {sorted(views.keys())}"
+        )
+
+    return views[REREF_VIEW_KEY]
 
 
 if __name__ == "__main__":

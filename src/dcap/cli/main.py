@@ -19,8 +19,7 @@ from typing import Dict, Sequence
 from dcap.cli.cli_types import CliCommand
 
 from dcap.cli.commands import registry as cmd_registry
-from dcap.cli.commands import bids_anat as cmd_bids_anat
-from dcap.cli.commands import bids_convert as cmd_bids_convert
+from dcap.cli.commands.bids import bids_anat as cmd_bids_anat, bids_convert as cmd_bids_convert
 from dcap.cli.commands.viz import report as cmd_report
 from dcap.cli.commands.viz import seeg_clinical_report as cmd_seeg_clinical_report
 

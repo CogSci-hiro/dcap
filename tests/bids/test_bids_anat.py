@@ -67,7 +67,7 @@ def test_bids_anat_command_registers_subparser() -> None:
     """
     Ensure the module registers the 'bids-anat' subcommand without error.
     """
-    from dcap.cli.commands import bids_anat as cmd_bids_anat
+    from dcap.cli.commands.bids import bids_anat as cmd_bids_anat
 
     parser = _build_root_parser()
     subparsers = _get_subparsers(parser)
@@ -92,7 +92,7 @@ def test_bids_anat_requires_expected_minimum_args(tmp_path: Path) -> None:
     This test is intentionally flexible: it only checks that parsing *without any*
     additional flags fails, which is true for most real commands.
     """
-    from dcap.cli.commands import bids_anat as cmd_bids_anat
+    from dcap.cli.commands.bids import bids_anat as cmd_bids_anat
 
     parser = _build_root_parser()
     subparsers = _get_subparsers(parser)
@@ -120,7 +120,7 @@ def test_bids_anat_parses_common_args(argv: list[str]) -> None:
     This assumes the command uses the standard pattern:
         parser.set_defaults(func=run_from_args)
     """
-    from dcap.cli.commands import bids_anat as cmd_bids_anat
+    from dcap.cli.commands.bids import bids_anat as cmd_bids_anat
 
     parser = _build_root_parser()
     subparsers = _get_subparsers(parser)
@@ -146,7 +146,7 @@ def test_bids_anat_handler_calls_library_function(monkeypatch: pytest.MonkeyPatc
 
     This is the key test: "CLI is thin; logic is in the library".
     """
-    from dcap.cli.commands import bids_anat as cmd_bids_anat
+    from dcap.cli.commands.bids import bids_anat as cmd_bids_anat
 
     # -------------------------------------------------------------------------
     # Build parser + register command
