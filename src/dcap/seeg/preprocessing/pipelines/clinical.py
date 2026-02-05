@@ -14,7 +14,7 @@ from dcap.seeg.preprocessing.blocks.coordinates import attach_coordinates
 from dcap.seeg.preprocessing.blocks.filtering import highpass_filter
 from dcap.seeg.preprocessing.blocks.line_noise import remove_line_noise
 from dcap.seeg.preprocessing.blocks.resample import resample_raw
-from dcap.seeg.preprocessing.blocks.rereference import rereference
+from dcap.seeg.preprocessing.blocks.rereference import rereference_view
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig, CoordinatesConfig
 from dcap.seeg.preprocessing.types import BlockArtifact, PreprocContext, PreprocResult
 
@@ -93,7 +93,7 @@ def run_clinical_preproc(
 
     # Rereference (generates additional views)
     if cfg.do_rereference:
-        reref_views, artifact = rereference(raw=current_raw, cfg=cfg.rereference, ctx=ctx_final)
+        reref_views, artifact = rereference_view(raw=current_raw, cfg=cfg.rereference, ctx=ctx_final)
         artifacts.append(artifact)
         # Ensure original reflects latest voltage-space raw
         if "original" in reref_views:

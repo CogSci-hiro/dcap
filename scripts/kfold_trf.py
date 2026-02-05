@@ -96,7 +96,7 @@ NOTCH_N_HARMONICS: int = 6
 NOTCH_NYQUIST_MARGIN_HZ: float = 0.5
 
 BROADBAND_LFREQ_HZ: float = 1.0
-BROADBAND_HFREQ_HZ: float = 30.0
+BROADBAND_HFREQ_HZ: float = 50.0
 
 HIGHGAMMA_LFREQ_HZ: float = 70.0
 HIGHGAMMA_HFREQ_HZ: float = 150.0
@@ -109,10 +109,10 @@ TIME_SHUFFLE: bool = False     # MUST be False for contiguous behavior
 TIME_RANDOM_STATE: int = 0
 
 
-ALPHAS: np.ndarray = np.logspace(-6, 6, 30)  # np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
+ALPHAS: np.ndarray = np.logspace(-6, 6, 100)  # np.array([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4], dtype=float)
 
-TMIN_MS: float = -1000.0
-TMAX_MS: float = 1000.0
+TMIN_MS: float = -500.0
+TMAX_MS: float = 500.0
 LAG_STEP_MS: float = 1000.0 / SFREQ_OUT_HZ  # 1 sample at 128 Hz
 
 SCORE_METRIC: Literal["r2"] = "r2"
@@ -127,8 +127,8 @@ CROP_TOLERANCE_S: float = .01            # allow small annotation jitter
 
 THRESHOLD = 0.005
 
-SPEECH_ENV_LP_HZ: float = 15.0          # common choice: 8 Hz (syllabic-rate-ish)
-SPEECH_ENV_LP_TRANS_BW_HZ: float = 2.0 # transition band
+SPEECH_ENV_LP_HZ: float = 8.0          # common choice: 8 Hz (syllabic-rate-ish)
+SPEECH_ENV_LP_TRANS_BW_HZ: float = 2.0  # transition band
 
 # Gap to prevent TRF lag leakage (seconds). Use >= max(|tmin|, |tmax|); conservative is max lag.
 CV_GAP_S: float = max(abs(TMIN_MS), abs(TMAX_MS)) / 1000.0
@@ -995,7 +995,7 @@ def apply_dcap_rereference(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
     cfg = _build_rereference_config()
     ctx = _build_preproc_context()
 
-    views, _artifact = dcap_rereference(raw=raw, cfg=cfg, ctx=ctx)
+    views, _artifact = dcap_rereference_view(raw=raw, cfg=cfg, ctx=ctx)
 
     if REREF_VIEW_KEY not in views:
         raise KeyError(
