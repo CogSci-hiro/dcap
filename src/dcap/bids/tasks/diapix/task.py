@@ -8,7 +8,6 @@ from typing import Any, Optional, Sequence
 
 import mne
 from mne_bids import BIDSPath
-import numpy as np
 
 from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
 from dcap.bids.tasks.diapix.models import DiapixRecordingUnit, DiapixTiming
