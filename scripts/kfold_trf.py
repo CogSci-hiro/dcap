@@ -839,7 +839,7 @@ def crop_raw_to_conversation(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
 
     end_t = float(np.min(end_after))
 
-    #dur = end_t - start_t
+    #-dur = end_t - start_t
     #if not (CROP_EXPECTED_DURATION_S - CROP_TOLERANCE_S <= dur <= CROP_EXPECTED_DURATION_S + CROP_TOLERANCE_S):
     #    raise ValueError(
     #        f"Conversation crop duration is {dur:.3f}s, expected ~{CROP_EXPECTED_DURATION_S}s "
