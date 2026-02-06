@@ -11,7 +11,7 @@ from typing import Mapping, Optional, Sequence
 import mne
 
 from dcap.seeg.preprocessing.blocks.coordinates import attach_coordinates
-from dcap.seeg.preprocessing.blocks.filtering import highpass_filter
+from dcap.seeg.preprocessing.blocks.filtering import highpass_view
 from dcap.seeg.preprocessing.blocks.line_noise import remove_line_noise_view
 from dcap.seeg.preprocessing.blocks.resample import resample_raw
 from dcap.seeg.preprocessing.blocks.rereference import rereference_view
@@ -81,7 +81,7 @@ def run_clinical_preproc(
 
     # High-pass
     if cfg.do_highpass:
-        current_raw, artifact = highpass_filter(raw=current_raw, cfg=cfg.highpass, ctx=ctx_final)
+        current_raw, artifact = highpass_view(raw=current_raw, cfg=cfg.highpass, ctx=ctx_final)
         artifacts.append(artifact)
         views["original"] = current_raw
 
