@@ -26,10 +26,8 @@ Usage
     pytest -q
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import numpy.testing as npt
@@ -142,19 +140,27 @@ def toy_geometry() -> _DummyGeometry:
 
 def _import_block_rereference():
     """
-    Import the rereference block function.
+    Import the clinical/block rereference entrypoint.
 
-    This helper makes the test file resilient to future refactors:
-    - If the block API is renamed to `rereference_view`, update here.
+    After the refactor, the block API is named `rereference_view(raw, cfg, ctx)`.
+    Older code may still have a `rereference(raw, cfg, ctx)` entrypoint.
+
+    This helper prefers `rereference_view` but falls back to `rereference`.
     """
     try:
-        from dcap.seeg.preprocessing.blocks.rereference import rereference as rereference_block  # type: ignore
+        from dcap.seeg.preprocessing.blocks.rereference import rereference_view as rereference_block  # type: ignore
         return rereference_block
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(
-            "Could not import dcap.seeg.preprocessing.blocks.rereference.rereference. "
-            "If you refactored names, update _import_block_rereference()."
-        ) from exc
+    except Exception:  # noqa
+        try:
+            from dcap.seeg.preprocessing.blocks.rereference import rereference as rereference_block  # type: ignore
+            return rereference_block
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "Could not import block rereference entrypoint. Expected one of:\n"
+                "- dcap.seeg.preprocessing.blocks.rereference.rereference_view\n"
+                "- dcap.seeg.preprocessing.blocks.rereference.rereference\n"
+                "If you refactored names/paths, update _import_block_rereference()."
+            ) from exc
 
 
 # =============================================================================

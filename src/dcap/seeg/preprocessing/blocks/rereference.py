@@ -481,18 +481,51 @@ def _iter_bipolar_pairs(shafts: Mapping[str, Sequence[str]]) -> List[Tuple[str, 
 
 def _extract_channel_positions(raw: mne.io.BaseRaw) -> Dict[str, np.ndarray]:
     """
-    Extract per-channel xyz positions from info['chs'][i]['loc'] when present.
+    Extract per-channel xyz positions.
 
-    Notes:
-    - MNE stores channel "loc" as a 12-length vector; first 3 values are xyz.
-    - We treat a location as valid if it's finite and non-zero.
+    Priority order
+    --------------
+    1) Montage channel positions (most reliable for iEEG):
+         raw.get_montage().get_positions()["ch_pos"]
+       This is where `raw.set_montage(make_dig_montage(...))` stores positions.
+
+    2) Fallback: info['chs'][i]['loc'][:3]
+       Some pipelines populate this directly; often zero for SEEG unless explicitly set.
+
+    Returns
+    -------
+    pos
+        Mapping channel_name -> xyz (float64).
     """
     pos: Dict[str, np.ndarray] = {}
+
+    # 1) Montage positions (preferred)
+    try:
+        montage = raw.get_montage()
+    except Exception:
+        montage = None
+
+    if montage is not None:
+        positions = montage.get_positions()
+        ch_pos = positions.get("ch_pos", None)
+        if isinstance(ch_pos, dict):
+            for name, xyz in ch_pos.items():
+                if name not in raw.ch_names:
+                    continue
+                arr = np.asarray(xyz, dtype=float)
+                if arr.shape == (3,) and np.all(np.isfinite(arr)):
+                    pos[name] = arr
+
+    # 2) Fallback: info['chs'][i]['loc']
+    # Only fill missing channels (montage takes precedence).
     for idx, name in enumerate(raw.ch_names):
+        if name in pos:
+            continue
         loc = raw.info["chs"][idx]["loc"]
-        xyz = np.array(loc[:3], dtype=float)
+        xyz = np.asarray(loc[:3], dtype=float)
         if np.all(np.isfinite(xyz)) and np.linalg.norm(xyz) > 0:
             pos[name] = xyz
+
     return pos
 
 
