@@ -95,7 +95,9 @@ def prepare_diapix_events(
     conversation_start_s_clamped = max(0.0, conversation_start_s)
     conversation_start_sample = int(conversation_start_s_clamped * sfreq)
 
-    conversation_end_sample = conversation_start_sample + int(CONVERSATION_DURATION_S * sfreq)
+    planned_conversation_end_sample = conversation_start_sample + int(CONVERSATION_DURATION_S * sfreq)
+    file_end_sample = int(raw.n_times - 1)
+    conversation_end_sample = min(planned_conversation_end_sample, file_end_sample)
 
     events = np.zeros((2, 3), dtype=int)
     events[0, 0] = conversation_start_sample
@@ -112,6 +114,9 @@ def prepare_diapix_events(
         "pad_required_s": float(pad_required_s),
         "wav_onsets_s": wav_onsets_s,  # np.ndarray
         "raw_onsets_s": raw_onsets_s,  # np.ndarray
+        "conversation_end_sample_planned": int(planned_conversation_end_sample),
+        "conversation_end_sample_actual": int(conversation_end_sample),
+        "conversation_window_is_full": bool(conversation_end_sample == planned_conversation_end_sample),
     }
     return prepared, alignment
 
