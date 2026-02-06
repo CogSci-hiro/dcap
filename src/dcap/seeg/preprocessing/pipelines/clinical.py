@@ -12,7 +12,7 @@ import mne
 
 from dcap.seeg.preprocessing.blocks.coordinates import attach_coordinates
 from dcap.seeg.preprocessing.blocks.filtering import highpass_filter
-from dcap.seeg.preprocessing.blocks.line_noise import remove_line_noise
+from dcap.seeg.preprocessing.blocks.line_noise import remove_line_noise_view
 from dcap.seeg.preprocessing.blocks.resample import resample_raw
 from dcap.seeg.preprocessing.blocks.rereference import rereference_view
 from dcap.seeg.preprocessing.configs import ClinicalPreprocConfig, CoordinatesConfig
@@ -75,7 +75,7 @@ def run_clinical_preproc(
 
     # Line noise
     if cfg.do_line_noise:
-        current_raw, artifact = remove_line_noise(raw=current_raw, cfg=cfg.line_noise, ctx=ctx_final)
+        current_raw, artifact = remove_line_noise_view(raw=current_raw, cfg=cfg.line_noise, ctx=ctx_final)
         artifacts.append(artifact)
         views["original"] = current_raw
 
