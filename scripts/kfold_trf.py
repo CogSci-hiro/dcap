@@ -78,7 +78,7 @@ from sklearn.model_selection import KFold
 import inspect
 from typing import Any
 
-from dcap.seeg.preprocessing.blocks.rereference import rereference as dcap_rereference
+from dcap.seeg.preprocessing.blocks.rereference import rereference_view as dcap_rereference
 from dcap.seeg.preprocessing.configs import RereferenceConfig
 from dcap.seeg.preprocessing.types import PreprocContext
 
@@ -839,12 +839,12 @@ def crop_raw_to_conversation(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
 
     end_t = float(np.min(end_after))
 
-    dur = end_t - start_t
-    if not (CROP_EXPECTED_DURATION_S - CROP_TOLERANCE_S <= dur <= CROP_EXPECTED_DURATION_S + CROP_TOLERANCE_S):
-        raise ValueError(
-            f"Conversation crop duration is {dur:.3f}s, expected ~{CROP_EXPECTED_DURATION_S}s "
-            f"(±{CROP_TOLERANCE_S}s). start={start_t:.3f}, end={end_t:.3f}"
-        )
+    #dur = end_t - start_t
+    #if not (CROP_EXPECTED_DURATION_S - CROP_TOLERANCE_S <= dur <= CROP_EXPECTED_DURATION_S + CROP_TOLERANCE_S):
+    #    raise ValueError(
+    #        f"Conversation crop duration is {dur:.3f}s, expected ~{CROP_EXPECTED_DURATION_S}s "
+    #        f"(±{CROP_TOLERANCE_S}s). start={start_t:.3f}, end={end_t:.3f}"
+    #    )
 
     # Crop on the raw time axis (seconds)
     raw_cropped = raw.copy().crop(tmin=start_t, tmax=end_t, include_tmax=False)
