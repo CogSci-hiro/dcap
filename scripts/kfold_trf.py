@@ -995,7 +995,7 @@ def apply_dcap_rereference(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
     cfg = _build_rereference_config()
     ctx = _build_preproc_context()
 
-    views, _artifact = dcap_rereference_view(raw=raw, cfg=cfg, ctx=ctx)
+    views, _artifact = dcap_rereference(raw=raw, cfg=cfg, ctx=ctx)
 
     if REREF_VIEW_KEY not in views:
         raise KeyError(
