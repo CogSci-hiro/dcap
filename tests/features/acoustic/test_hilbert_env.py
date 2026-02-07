@@ -143,13 +143,13 @@ def test_lowpass_invalid_cutoff_raises() -> None:
     time = FeatureTimeBase(sfreq=100.0, n_times=100, t0_s=0.0)
     comp = HilbertEnvelopeComputer()
 
-    # Nyquist at target grid is 50 Hz
+    # Nyquist at audio_sfreq is 500 Hz -> make cutoff >= 500 invalid
     with pytest.raises(ValueError):
         _ = comp.compute(
             time=time,
             audio=audio,
             audio_sfreq=sfreq_audio,
-            config=HilbertEnvelopeConfig(lowpass_hz=60.0),
+            config=HilbertEnvelopeConfig(lowpass_hz=600.0),
         )
 
 
