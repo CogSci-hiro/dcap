@@ -5,19 +5,22 @@
 🔄in progress
 
 # TODO MAIN
+- channel selection
 🔄 finish preprocess command
 - finish trf package
   - full configurability
   - parallel running
   - proper CV handling
 🔄 finish speech features
-  - speech envelope
-    - Hilbert
-    - Oganian
-    - Praat
+  ✅ speech envelope
+    ✅ Hilbert
+    ✅ Oganian
+    ✅ Praat
   - spectrogram
-  - cochleogram
-  - midbrain
+  - mel spectrogram
+  - MFCC
+  ✅ cochleogram
+  ✅ midbrain
   - plus deltas
 - finish TRF command
 
