@@ -5,7 +5,7 @@
 🔄in progress
 
 # TODO MAIN
-- channel selection
+🔄 channel selection
 🔄 finish preprocess command
 - finish trf package
   - full configurability
@@ -16,12 +16,12 @@
     ✅ Hilbert
     ✅ Oganian
     ✅ Praat
-  - spectrogram
-  - mel spectrogram
-  - MFCC
+  ✅ spectrogram
+  ✅ mel spectrogram
+  ✅ MFCC
   ✅ cochleogram
   ✅ midbrain
-  - plus deltas
+  🔄 plus deltas
 - finish TRF command
 
 

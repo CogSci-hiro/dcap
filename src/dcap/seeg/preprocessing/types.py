@@ -122,3 +122,50 @@ class PreprocResult:
     views: Mapping[str, mne.io.BaseRaw]
     artifacts: Sequence[BlockArtifact]
     ctx: PreprocContext
+
+
+@dataclass(frozen=True)
+class BadChannelReason:
+    """
+    Explanation for why a channel was marked as bad.
+
+    This object is designed to be:
+    - human-readable (for reports and QC)
+    - machine-readable (for filtering / aggregation)
+    - serializable (stored in ctx.decisions and artifacts)
+
+    Parameters
+    ----------
+    code
+        Short machine-readable identifier for the reason.
+        Examples:
+        - "bids_channels_tsv"
+        - "flat_signal"
+        - "excessive_line_noise"
+        - "manual_override"
+
+    message
+        Human-readable explanation.
+        This should be suitable for direct display in logs or reports.
+
+    source
+        Origin of the decision.
+        Examples:
+        - "bids"
+        - "automatic"
+        - "manual"
+        - "imported"
+
+    metric
+        Optional numeric metric associated with the decision
+        (e.g., variance, z-score, noise ratio).
+
+    threshold
+        Optional threshold used to justify the decision.
+    """
+
+    code: str
+    message: str
+    source: str = "automatic"
+    metric: Optional[float] = None
+    threshold: Optional[float] = None
