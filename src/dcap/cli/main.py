@@ -22,6 +22,7 @@ from dcap.cli.commands import registry as cmd_registry
 from dcap.cli.commands.bids import bids_anat as cmd_bids_anat, bids_convert as cmd_bids_convert
 from dcap.cli.commands.viz import report as cmd_report
 from dcap.cli.commands.viz import seeg_clinical_report as cmd_seeg_clinical_report
+from dcap.cli.commands import preprocess as cmd_preprocess
 
 
 # =============================================================================
@@ -33,7 +34,8 @@ _COMMANDS: Dict[str, CliCommand] = {
     "bids-anat": cmd_bids_anat,
     "bids-convert": cmd_bids_convert,
     "report": cmd_report,
-    "seeg-clinical-report": cmd_seeg_clinical_report
+    "seeg-clinical-report": cmd_seeg_clinical_report,
+    "preprocess": cmd_preprocess
 }
 
 
