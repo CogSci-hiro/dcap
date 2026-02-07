@@ -197,7 +197,7 @@ def _spectral_bandpass_fir(
 
     # Kernel half-length in channels ~ n_cycles / center
     half_len_ch = int(np.ceil(0.5 * (n_cycles / max(center_cyc_per_ch, 1e-6))))
-    n_taps = 2 * half_len_ch + 1
+    # n_taps = 2 * half_len_ch + 1
     idx = np.arange(-half_len_ch, half_len_ch + 1, dtype=float)
 
     # Gaussian window width from bandwidth (heuristic)
