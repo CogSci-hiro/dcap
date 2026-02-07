@@ -1,0 +1,237 @@
+# dcap_preprocess.yaml
+version: 1
+
+# =============================================================================
+# Selection: what to process
+# =============================================================================
+selection:
+  scope: "run"                 # "run" | "patient" | "dataset"
+  bids_root: "/path/to/bids"   # BIDS root containing sub-*/ses-* data
+  derivatives_root: null       # null => <bids_root>/derivatives
+
+  # Used when scope is "run" or "patient"
+  subject: "027"               # without "sub-"
+  session: null                # without "ses-" (null if none)
+  task: "conversation"         # optional
+  run: "1"                     # required if scope="run"
+
+  # Used when scope is "dataset" (optional if you just traverse bids_root)
+  dataset_id: null             # optional: your own registry key
+
+  # Optional run filtering (applies for patient/dataset scopes)
+  include:
+    subjects: null             # e.g. ["001", "002"] or null
+    sessions: null             # e.g. ["01"] or null
+    tasks: null                # e.g. ["conversation"] or null
+    runs: null                 # e.g. ["1", "2"] or null
+  exclude:
+    subjects: null
+    sessions: null
+    tasks: null
+    runs: null
+
+# =============================================================================
+# IO: how/where to save
+# =============================================================================
+io:
+  derivatives_name: "preproc"  # derivatives/<derivatives_name>/
+  overwrite: false
+  preload: true               # preload Raw before processing (MNE requirement for some ops)
+  save_format: "fif"          # "fif" (recommended)
+  compress: true              # if your saver supports it
+  save_provenance: true       # write json/yaml log next to outputs
+  fail_fast: false            # debug mode toggle (your errors/ package can hook here)
+
+  # Naming conventions
+  output_suffix: "raw"        # e.g. "raw" or "ieeg"
+  desc_prefix: "desc"         # used in desc-* entities if you do that
+
+# =============================================================================
+# Pipeline: choose an order profile
+# =============================================================================
+pipeline:
+  profile: "canonical"        # "canonical" | "zapline_optimized"
+
+  # Only used in zapline_optimized profile:
+  # - if true: zapline happens before resample (native sampling)
+  # - if false: resample first, then zapline (faster)
+  zapline_at_native_sfreq: true
+
+  # Optional "pre-zapline" highpass (helps with slow drift if zapline struggles).
+  # Keep null unless you know you need it.
+  pre_zapline_highpass_hz: null   # e.g. 1.0
+
+  # Optional: stop after step (useful for debugging)
+  stop_after: null            # e.g. "line_noise" | "filtering" | "rereference" | null
+
+# =============================================================================
+# Picks / channels
+# =============================================================================
+channels:
+  picks: null                 # null => default (iEEG picks inside your core funcs)
+  exclude_bads_globally: true # always drop/exclude bads where applicable
+  bads_from: "raw"            # "raw" | "channels_tsv" | "none" (depending on your implementation)
+
+# =============================================================================
+# Step: Resample
+# =============================================================================
+resample:
+  enabled: true
+  sfreq_out_hz: 512.0
+
+  # optional antialias / method knobs (only if your resample.py exposes them)
+  method: null                # e.g. "polyphase" | null
+  npad: "auto"
+
+# =============================================================================
+# Step: Line noise removal
+# =============================================================================
+line_noise:
+  enabled: true
+  method: "zapline"           # "notch" | "zapline"
+
+  # Common
+  base_freq_hz: 50.0          # 50 or 60 depending on site
+  max_harmonic_hz: 250.0      # used for notch harmonic list; safe default
+
+  # Notch parameters (only used if method="notch")
+  notch:
+    freqs_hz: null            # null => auto from base_freq_hz..max_harmonic_hz
+    notch_widths_hz: null     # optional
+    phase: "zero"
+    fir_design: "firwin"
+
+  # Zapline parameters (only used if method="zapline")
+  zapline:
+    chunk_sec: 60.0
+    nremove: 1
+    use_float32: true
+
+# =============================================================================
+# Step: Filtering
+# =============================================================================
+filtering:
+  enabled: true
+  mode: "broadband"           # "broadband" | "high_gamma_envelope"
+
+  # -------------------------
+  # Broadband path
+  # -------------------------
+  broadband:
+    # Most TRF / ERP-ish workflows want at least a highpass.
+    highpass:
+      enabled: true
+      l_freq_hz: 1.0
+      phase: "zero"
+      fir_design: "firwin"
+
+    lowpass:
+      enabled: false
+      h_freq_hz: 200.0
+      phase: "zero"
+      fir_design: "firwin"
+
+    bandpass:
+      enabled: false
+      l_freq_hz: 1.0
+      h_freq_hz: 200.0
+      phase: "zero"
+      fir_design: "firwin"
+
+  # -------------------------
+  # High-gamma envelope path
+  # -------------------------
+  high_gamma_envelope:
+    enabled: false            # if mode="high_gamma_envelope", set true
+    bandpass:
+      l_freq_hz: 70.0
+      h_freq_hz: 150.0
+      phase: "zero"
+      fir_design: "firwin"
+
+    envelope:
+      method: "hilbert"       # "hilbert" (your filtering.py likely does this)
+      rectify: false          # if your implementation supports rectification pre-hilbert
+
+    # Optional smoothing / lowpass on the envelope
+    smooth:
+      enabled: true
+      method: "lowpass"       # "lowpass" | "moving_average"
+      lowpass_hz: 10.0        # typical for HGA envelope
+      window_ms: 50.0         # used if method="moving_average"
+
+    # Optional downsample of envelope (recommended for TRF)
+    downsample:
+      enabled: true
+      sfreq_out_hz: 128.0
+
+    output:
+      channel_type: "misc"
+      name_suffix: "HGAenv"   # appended to output filename/desc if you do that
+
+# =============================================================================
+# Step: Rereference
+# =============================================================================
+rereference:
+  enabled: true
+
+  # You can output one or multiple rereferenced "views".
+  # If multiple are listed, the pipeline can save multiple derivative files.
+  views:
+    - method: "car"           # "original" | "car" | "bipolar" | "laplacian" | "wm_ref"
+      name: "car"
+      params:
+        scope: "global"       # "global" | "by_shaft"
+        exclude_bads: true
+
+    # Uncomment to also save bipolar
+    # - method: "bipolar"
+    #   name: "bipolar"
+    #   params:
+    #     exclude_bads: true
+    #     keep_info_channels: true
+
+    # Uncomment to also save laplacian
+    # - method: "laplacian"
+    #   name: "laplacian"
+    #   params:
+    #     mode: "shaft_1d"     # "shaft_1d" | "knn_3d"
+    #     k: 4                 # only for knn_3d
+    #     exclude_bads: true
+
+    # Uncomment for white-matter referencing if you have the mapping
+    # - method: "wm_ref"
+    #   name: "wmref"
+    #   params:
+    #     wm_contacts: null          # list or path to file
+    #     reference_map: null        # mapping or path to file
+    #     exclude_bads: true
+
+  # If views contains multiple methods, decide which one is the "default" for downstream.
+  default_view: "car"          # name field from views
+  save_all_views: true         # if false, only save default_view
+
+# =============================================================================
+# Saving: file naming hints
+# =============================================================================
+naming:
+  # If you follow BIDS-like entities in derivatives, these help keep things consistent.
+  # You can ignore if your saver already decides.
+  include_entities:
+    - subject
+    - session
+    - task
+    - run
+  add_desc_entity: true
+  desc_from:
+    - line_noise
+    - filtering
+    - rereference
+
+# =============================================================================
+# Logging / reports (optional hooks for your errors/ + logging subpackages)
+# =============================================================================
+reporting:
+  write_step_log: true
+  write_error_report: true
+  write_runtime_report: true

@@ -5,7 +5,7 @@
 🔄in progress
 
 # TODO MAIN
-🔄 channel selection
+✅ channel selection
 🔄 finish preprocess command
 - finish trf package
   - full configurability
