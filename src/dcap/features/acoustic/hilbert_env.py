@@ -192,7 +192,7 @@ class HilbertEnvelopeComputer(FeatureComputer):
     def kind(self) -> FeatureKind:
         return "acoustic"
 
-    def compute(
+    def compute(  # noqa
             self,
             *,
             time: FeatureTimeBase,
