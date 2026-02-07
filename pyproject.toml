@@ -24,7 +24,8 @@ dependencies = [
   "ipywidgets",
   "praatio",
   "pyyaml",
-  "soundfile"
+  "soundfile",
+  "typer"
 ]
 
 [project.scripts]
