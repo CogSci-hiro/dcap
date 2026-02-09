@@ -15,6 +15,7 @@ from .lags import LagSpec, compute_lags
 from .metrics import aggregate_outputs, metric_dispatch
 from .types import CvResult, CvSpec, FitSpec, ScoringSpec, TrfModel, TrfResult
 from .prep import PreparedDataset
+from .predict_kernel import predict_from_kernel
 
 
 def _concat_segments(segments, indices: Sequence[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -121,7 +122,7 @@ def select_alpha_cv(
             X_te, Y_te, seg_lens = _concat_segments(dataset.segments, fold.test_indices)
 
             fit = be.fit(X_tr, Y_tr, lags_samp=lags_samp, alpha=float(alpha), sfreq=dataset.sfreq, **params)
-            Y_hat = be.predict(fit, X_te, lags_samp=lags_samp, sfreq=dataset.sfreq, **params)
+            Y_hat = predict_from_kernel(X_te, coef=fit.coef, intercept=fit.intercept, lags_samp=lags_samp, mode=lag_spec.mode)
 
             # Score per segment then aggregate (time-series friendly)
             seg_scores = []
