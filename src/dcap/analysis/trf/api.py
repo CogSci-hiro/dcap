@@ -132,6 +132,51 @@ class TemporalReceptiveField:
         per_out = score_fn(np.asarray(Y), np.asarray(y_hat), complex_handling=self.scoring_spec.complex_handling)
         return aggregate_outputs(per_out, agg=output_agg)
 
+def plot_kernel(
+    self,
+    *,
+    feature_index: int = 0,
+    output_index: int = 0,
+    view: str = "real",
+    ax=None,
+    title: str | None = None,
+):
+    """Plot a single TRF kernel.
+
+    Parameters
+    ----------
+    feature_index
+        Which feature to plot.
+    output_index
+        Which output to plot.
+    view
+        For complex kernels: 'real', 'imag', or 'magnitude'.
+    ax
+        Optional matplotlib Axes to draw into.
+    title
+        Optional plot title.
+
+    Returns
+    -------
+    ax
+        Matplotlib axes.
+
+    Usage example
+    -------------
+        trf.plot_kernel(feature_index=0, output_index=3)
+    """
+    if self.result_ is None:
+        raise RuntimeError("Nothing to plot; fit() or read_trf() first.")
+    from .plot import plot_kernel_1d
+    return plot_kernel_1d(
+        self.result_.model,
+        feature_index=int(feature_index),
+        output_index=int(output_index),
+        view=view,  # type: ignore[arg-type]
+        ax=ax,
+        title=title,
+    )
+
     def save(self, fname: str | Path) -> None:
         if self.result_ is None:
             raise RuntimeError("Nothing to save; fit() first.")

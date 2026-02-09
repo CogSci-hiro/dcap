@@ -34,3 +34,10 @@ trf2 = __import__("dcap").analysis.trf.read_trf("demo_trf.npz")
 score = trf2.score(X, Y, sfreq=sfreq)
 print(score)
 ```
+
+
+## Plotting
+
+```python
+trf.plot_kernel(feature_index=0, output_index=0)
+```
