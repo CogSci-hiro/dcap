@@ -2,8 +2,6 @@
 # TRF analysis: persistence (MNE-style)
 # =============================================================================
 
-from __future__ import annotations
-
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -11,7 +9,6 @@ from typing import Any, Dict
 
 import numpy as np
 
-from .api import TemporalReceptiveField  # circular-ish but ok for read_trf
 from .types import CvResult, LagSpec, SegmentSpec, CvSpec, FitSpec, ScoringSpec, TrfModel, TrfResult
 
 
@@ -56,8 +53,9 @@ def _save_trf_result(path: Path, result: TrfResult) -> None:
     )
 
 
-def read_trf(fname: str | Path) -> TemporalReceptiveField:
+def read_trf(fname: str | Path) -> Any:
     """Read a saved TRF from disk (MNE-style reader)."""
+    from .api import TemporalReceptiveField
     path = Path(fname)
     with np.load(path, allow_pickle=True) as npz:
         coef = npz["coef"]
