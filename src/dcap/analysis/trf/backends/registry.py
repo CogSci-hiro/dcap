@@ -2,9 +2,7 @@
 # TRF analysis: backend registry
 # =============================================================================
 
-from __future__ import annotations
-
-from typing import Dict
+from typing import Dict, List
 
 from .base import TrfBackend
 from .ridge import RidgeLagBackend
@@ -23,3 +21,13 @@ def get_backend(name: str) -> TrfBackend:
     if name not in _BACKENDS:
         raise KeyError(f"Unknown TRF backend {name!r}. Available: {sorted(_BACKENDS)}")
     return _BACKENDS[name]
+
+
+def list_backends() -> List[str]:
+    """Return available backend names.
+
+    Usage example
+    -------------
+        names = list_backends()
+    """
+    return sorted(_BACKENDS.keys())

@@ -103,20 +103,24 @@ class TemporalReceptiveField:
         return self._predict_2d(X, sfreq=float(sfreq))
 
     def _predict_2d(self, X2: np.ndarray, *, sfreq: float) -> np.ndarray:
-    from .predict_kernel import predict_from_kernel
+        from .predict_kernel import predict_from_kernel
 
-    model = self.result_.model
-    mode = "valid"
-    if self.result_.lag_spec is not None:
-        mode = self.result_.lag_spec.mode
+        if self.result_ is None:
+            raise RuntimeError("Call fit() or load a saved TRF before predict().")
 
-    return predict_from_kernel(
-        X2,
-        coef=model.coef,
-        intercept=model.intercept,
-        lags_samp=model.lags_samp,
-        mode=mode,
-    )
+        model = self.result_.model
+        mode = "valid"
+        if self.result_.lag_spec is not None:
+            mode = self.result_.lag_spec.mode
+
+        return predict_from_kernel(
+            X2,
+            coef=model.coef,
+            intercept=model.intercept,
+            lags_samp=model.lags_samp,
+            mode=mode,
+        )
+
 
     def score(self, X: np.ndarray, Y: np.ndarray, *, sfreq: Optional[float] = None, output_agg: str = "mean") -> float:
         if sfreq is None:
