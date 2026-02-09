@@ -1,52 +1,51 @@
 # =============================================================================
-#                   TRF backends: base interface (stable)
+# TRF analysis: backend interface
 # =============================================================================
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
 class BackendFitResult:
-    """
-    Backend-agnostic fit output.
+    """Opaque backend fit result."""
 
-    Attributes
-    ----------
-    coef_ : ndarray
-        Backend coefficient array.
-    intercept_ : ndarray
-        Backend intercept array.
-    extra : mapping
-        Backend-specific state required for prediction (e.g., fitted estimator).
-
-    Usage example
-    -------------
-        result = BackendFitResult(coef_=coef, intercept_=intercept, extra={"estimator": obj})
-    """
-
-    coef_: np.ndarray
-    intercept_: np.ndarray
-    extra: Mapping[str, Any]
+    coef: np.ndarray
+    intercept: np.ndarray
+    extra: Dict[str, Any]
 
 
+@runtime_checkable
 class TrfBackend(Protocol):
-    """Protocol for TRF backends."""
+    """Backend protocol.
+
+    Backends fit TRFs given arrays and lag samples. CV, segmentation, and scoring
+    live above the backend.
+    """
 
     name: str
 
     def fit(
         self,
-        X: np.ndarray,
-        Y: np.ndarray,
+        X: np.ndarray,  # (n_times, n_features)
+        Y: np.ndarray,  # (n_times, n_outputs)
         *,
-        sfreq: float,
         lags_samp: np.ndarray,
-        config: Any,
-    ) -> BackendFitResult:
-        ...
+        alpha: float,
+        sfreq: float,
+        **params: Any,
+    ) -> BackendFitResult: ...
 
-    def predict(self, X: np.ndarray, fit_result: BackendFitResult) -> np.ndarray:
-        ...
+    def predict(
+        self,
+        fit: BackendFitResult,
+        X: np.ndarray,
+        *,
+        lags_samp: np.ndarray,
+        sfreq: float,
+        **params: Any,
+    ) -> np.ndarray: ...

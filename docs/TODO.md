@@ -7,7 +7,7 @@
 # TODO MAIN
 ✅ channel selection
 🔄 finish preprocess command
-- finish trf package
+🔄 finish trf package
   - full configurability
   - parallel running
   - proper CV handling
