@@ -1,0 +1,13 @@
+subject	run	onset	patient_start	experimentor_start	patient_penultimate	experimentor_penultimate	patient_end	experimentor_end	note
+NicEle	1	552.207	552.207	552.210					'patient_end': .013-.017
+NicEle	2	17.705	17.705	17.708
+NicEle	3	23.515		23.518					'partner_start': .518-.553 'partner_end': .308-.316
+NicEle	4	30.737	30.737						'patient_start': .727-.737, 'partner_start': .732-.740 'partner_end' .528-.541
+DenLoi	1	40.668	40.668	40.672					experimentor penultimate bad
+DenLoi	2	25.334	25.334	25.338
+DenLoi	3	15.810	15.810	15.814			259.840
+DenLoi	4	15.738	15.738	15.743			259.740
+BacJul	1	20.270	20.270	20.274	260.273
+BacJul	2	46.896	46.896	46.899	286.897
+BacJul	3	26.448	26.448	26.451			270.450
+BacJul	4	13.315	13.315	13.319			257.316
