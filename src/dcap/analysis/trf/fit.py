@@ -19,9 +19,12 @@ from .predict_kernel import predict_from_kernel
 
 
 def _concat_segments(segments, indices: Sequence[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # Keep segment boundaries (lens) so callers can score each held-out segment
+    # separately even though the backend is fit on concatenated arrays.
     xs = [segments[i].x for i in indices]
     ys = [segments[i].y for i in indices]
     lens = np.array([segments[i].n_samples for i in indices], dtype=int)
+    # Empty-fold fallbacks preserve feature/output dimensionality.
     X = np.concatenate(xs, axis=0) if xs else np.zeros((0, segments[0].x.shape[1]))
     Y = np.concatenate(ys, axis=0) if ys else np.zeros((0, segments[0].y.shape[1]))
     return X, Y, lens
@@ -41,6 +44,7 @@ def fit_once(
     if fit_spec.alphas is not None:
         raise ValueError("fit_once does not accept fit_spec.alphas; use fit_trf_auto for CV selection.")
 
+    # Materialize lag grid once and reuse for backend fit + model packaging.
     lags_samp, lags_s = compute_lags(lag_spec, dataset.sfreq)
 
     be = get_backend(backend)
@@ -48,6 +52,7 @@ def fit_once(
     # mode is derived from LagSpec
     params.setdefault("mode", lag_spec.mode)
 
+    # Single global fit on every prepared segment.
     X_all, Y_all, _ = _concat_segments(dataset.segments, range(len(dataset.segments)))
     fit = be.fit(X_all, Y_all, lags_samp=lags_samp, alpha=float(fit_spec.alpha), sfreq=dataset.sfreq, **params)
 
@@ -92,6 +97,7 @@ def select_alpha_cv(
     if np.any(alphas <= 0):
         raise ValueError("All alpha values must be > 0.")
 
+    # CV evaluates only alpha; lag grid stays fixed across folds.
     lags_samp, _ = compute_lags(lag_spec, dataset.sfreq)
     be = get_backend(backend)
     params = dict(backend_params or {})
@@ -105,6 +111,7 @@ def select_alpha_cv(
 
     n_alphas = alphas.size
     n_folds = len(folds)
+    # fold_scores[a, f] stores one scalar score per (alpha, fold) pair.
     fold_scores = np.zeros((n_alphas, n_folds), dtype=float)
 
     # Optional per-output selection
@@ -114,6 +121,7 @@ def select_alpha_cv(
 
     if per_output:
         n_outputs = dataset.n_outputs
+        # Running mean across folds: shape (n_alphas, n_outputs).
         score_by_alpha_by_output = np.zeros((n_alphas, n_outputs), dtype=float)
 
     for a_i, alpha in enumerate(alphas):
@@ -124,7 +132,8 @@ def select_alpha_cv(
             fit = be.fit(X_tr, Y_tr, lags_samp=lags_samp, alpha=float(alpha), sfreq=dataset.sfreq, **params)
             Y_hat = predict_from_kernel(X_te, coef=fit.coef, intercept=fit.intercept, lags_samp=lags_samp, mode=lag_spec.mode)
 
-            # Score per segment then aggregate (time-series friendly)
+            # Score per held-out segment first, then aggregate to avoid letting
+            # long concatenated folds blur segment-level failures.
             seg_scores = []
             seg_start = 0
             for L in seg_lens:
@@ -141,6 +150,7 @@ def select_alpha_cv(
             seg_scores = np.stack(seg_scores, axis=0)  # (n_segments_in_fold, n_outputs)
 
             if cv_spec.weight_by_duration:
+                # Duration weighting compensates for non-uniform segment lengths.
                 w = seg_lens.astype(float)
                 w = w / max(w.sum(), 1e-12)
                 per_out_fold = (seg_scores * w[:, None]).sum(axis=0)
@@ -150,13 +160,16 @@ def select_alpha_cv(
             if per_output:
                 score_by_alpha_by_output[a_i, :] += per_out_fold / float(n_folds)
 
+            # Collapse output channels to the scalar used for alpha ranking.
             fold_scores[a_i, f_i] = aggregate_outputs(per_out_fold, agg=output_agg)
 
+    # Shared-alpha selection uses mean score across folds.
     mean_scores = fold_scores.mean(axis=1)
     best_idx = int(np.argmax(mean_scores))
     best_alpha = float(alphas[best_idx])
 
     if per_output and score_by_alpha_by_output is not None:
+        # Optional per-output alpha choice is reported separately.
         best_alpha_by_output = alphas[np.argmax(score_by_alpha_by_output, axis=0)].astype(float)
 
     return CvResult(
@@ -192,6 +205,7 @@ def fit_trf_auto(
     chosen_alpha = fit_spec.alpha
 
     if chosen_alpha is None:
+        # First pass: choose alpha on held-out data only.
         cv_res = select_alpha_cv(
             dataset,
             lag_spec=lag_spec,
@@ -203,7 +217,7 @@ def fit_trf_auto(
         )
         chosen_alpha = cv_res.best_alpha
 
-    # Fit on all data with chosen alpha
+    # Second pass: refit once on all available data with selected alpha.
     final_fit_spec = FitSpec(alpha=float(chosen_alpha), alpha_mode="shared")
     result = fit_once(
         dataset,

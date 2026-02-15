@@ -13,6 +13,8 @@ from .types import CvSpec, Fold, TrfSegment
 
 
 def _group_by_run(segments: Sequence[TrfSegment]) -> Dict[str, List[int]]:
+    # Keep indices (not copies) so splitters can reference original segment
+    # metadata (start/stop samples) for purge logic.
     groups: Dict[str, List[int]] = {}
     for idx, seg in enumerate(segments):
         groups.setdefault(seg.run_id, []).append(idx)
@@ -29,6 +31,8 @@ def _apply_purge(
     if purge_samp <= 0:
         return tuple(train_indices)
 
+    # Purge only within the same run; leakage across independent runs is not a
+    # temporal concern.
     test_by_run: Dict[str, List[TrfSegment]] = {}
     for ti in test_indices:
         test_by_run.setdefault(segments[ti].run_id, []).append(segments[ti])
@@ -40,7 +44,7 @@ def _apply_purge(
         if not tests:
             kept.append(tr)
             continue
-        # Purge if segment is within purge_samp of any test segment in same run
+        # Purge if segment is within purge_samp of any test segment in same run.
         too_close = False
         for tseg in tests:
             if seg.stop_sample + purge_samp <= tseg.start_sample:
@@ -59,6 +63,7 @@ def iter_folds(segments: Sequence[TrfSegment], cv_spec: CvSpec, *, sfreq: float)
     if cv_spec.scheme == "loo_run":
         run_groups = _group_by_run(segments)
         run_ids = list(run_groups.keys())
+        # Convert purge duration once so fold generation stays deterministic.
         purge_samp = int(np.ceil(float(cv_spec.purge_s) * float(sfreq)))
         for fold_id, run_id in enumerate(run_ids):
             test_idx = tuple(run_groups[run_id])
@@ -79,7 +84,7 @@ def iter_folds(segments: Sequence[TrfSegment], cv_spec: CvSpec, *, sfreq: float)
 
         rng = np.random.default_rng(cv_spec.random_state) if cv_spec.shuffle else None
 
-        # Assign fold IDs per run to preserve run-local ordering
+        # Assign fold IDs per run, then merge runs into global train/test sets.
         run_groups = _group_by_run(segments)
         seg_to_fold = np.full(n_segments, -1, dtype=int)
 
@@ -92,8 +97,7 @@ def iter_folds(segments: Sequence[TrfSegment], cv_spec: CvSpec, *, sfreq: float)
                 for j, seg_idx in enumerate(idxs_sorted):
                     seg_to_fold[seg_idx] = j % n_splits
             elif cv_spec.assignment == "blocked_per_run":
-                # contiguous blocks assigned to folds by position
-                # map segment order -> fold index via proportional bins
+                # Map contiguous segment order to fold index via proportional bins.
                 m = len(idxs_sorted)
                 for j, seg_idx in enumerate(idxs_sorted):
                     fold = int(np.floor((j / m) * n_splits))
