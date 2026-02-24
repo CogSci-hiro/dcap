@@ -21,8 +21,13 @@ from dcap.cli.cli_types import CliCommand
 from dcap.cli.commands import registry as cmd_registry
 from dcap.cli.commands.bids import bids_anat as cmd_bids_anat, bids_convert as cmd_bids_convert
 from dcap.cli.commands.viz import report as cmd_report
-from dcap.cli.commands.viz import seeg_clinical_report as cmd_seeg_clinical_report
 from dcap.cli.commands import preprocess as cmd_preprocess
+
+try:
+    from dcap.cli.commands.viz import seeg_clinical_report as cmd_seeg_clinical_report
+except ImportError:
+    # Optional command path can be unavailable during TRF/analysis deprecation.
+    cmd_seeg_clinical_report = None
 
 
 # =============================================================================
@@ -34,9 +39,22 @@ _COMMANDS: Dict[str, CliCommand] = {
     "bids-anat": cmd_bids_anat,
     "bids-convert": cmd_bids_convert,
     "report": cmd_report,
-    "seeg-clinical-report": cmd_seeg_clinical_report,
     "preprocess": cmd_preprocess
 }
+
+if cmd_seeg_clinical_report is not None:
+    _COMMANDS["seeg-clinical-report"] = cmd_seeg_clinical_report
+
+
+def _iter_argparse_commands() -> Dict[str, CliCommand]:
+    """
+    Return only CLI command modules that implement the argparse command contract.
+    """
+    valid: Dict[str, CliCommand] = {}
+    for name, module in _COMMANDS.items():
+        if hasattr(module, "add_subparser") and hasattr(module, "run"):
+            valid[name] = module
+    return valid
 
 
 # =============================================================================
@@ -64,9 +82,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    for name, module in _COMMANDS.items():
-        if not hasattr(module, "add_subparser"):
-            raise RuntimeError(f"CLI command module for '{name}' is missing add_subparser().")
+    for name, module in _iter_argparse_commands().items():
         module.add_subparser(subparsers)
 
     return parser
@@ -97,12 +113,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     command_name = str(args.command)
-    module = _COMMANDS.get(command_name)
+    module = _iter_argparse_commands().get(command_name)
     if module is None:
         raise RuntimeError(f"Unknown command: {command_name}")
-
-    if not hasattr(module, "run"):
-        raise RuntimeError(f"CLI command module for '{command_name}' is missing run().")
 
     module.run(args)
 

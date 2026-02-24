@@ -114,6 +114,231 @@ def estimate_constant_delay(
     return _robust_mean_mad(np.asarray(onset_differences))
 
 
+def count_onset_matches(
+    *,
+    reference_onsets_s: np.ndarray,
+    target_onsets_s: np.ndarray,
+    delay_s: float,
+    match_tol_s: float,
+) -> int:
+    """
+    Count aligned onset pairs under a proposed constant delay.
+
+    Interpretation
+    --------------
+    We treat shifted reference onsets as predictions of target onsets:
+
+        reference_onsets_s + delay_s ~= target_onsets_s
+
+    Parameters
+    ----------
+    reference_onsets_s
+        Reference onset times (seconds), sorted ascending.
+    target_onsets_s
+        Target onset times (seconds), sorted ascending.
+    delay_s
+        Proposed constant delay (target minus reference).
+    match_tol_s
+        Absolute tolerance for a match.
+    """
+    if reference_onsets_s.size == 0 or target_onsets_s.size == 0:
+        return 0
+
+    shifted = np.asarray(reference_onsets_s, dtype=float) + float(delay_s)
+    target = np.asarray(target_onsets_s, dtype=float)
+
+    i = 0
+    j = 0
+    hits = 0
+    while i < shifted.size and j < target.size:
+        dt = float(shifted[i] - target[j])
+        if abs(dt) <= match_tol_s:
+            hits += 1
+            i += 1
+            j += 1
+        elif dt < -match_tol_s:
+            i += 1
+        else:
+            j += 1
+
+    return hits
+
+
+def estimate_delay_by_onset_hits(
+    *,
+    reference_onsets_s: np.ndarray,
+    target_onsets_s: np.ndarray,
+    max_offset: int,
+    match_tol_s: float,
+) -> float:
+    """
+    Estimate delay via onset-only matching, allowing missing leading events.
+
+    Returns
+    -------
+    float
+        Delay in seconds (target minus reference).
+    """
+    reference_onsets = np.asarray(reference_onsets_s, dtype=float)
+    target_onsets = np.asarray(target_onsets_s, dtype=float)
+
+    if reference_onsets.size == 0 or target_onsets.size == 0:
+        raise ValueError("Empty onset sequence; cannot estimate delay.")
+
+    max_ref = int(min(max_offset, reference_onsets.size - 1))
+    max_target = int(min(max_offset, target_onsets.size - 1))
+
+    best_hits = -1
+    best_delay = None
+
+    for i in range(max_ref + 1):
+        for j in range(max_target + 1):
+            delay = float(target_onsets[j] - reference_onsets[i])
+            hits = count_onset_matches(
+                reference_onsets_s=reference_onsets,
+                target_onsets_s=target_onsets,
+                delay_s=delay,
+                match_tol_s=match_tol_s,
+            )
+            if hits > best_hits:
+                best_hits = hits
+                best_delay = delay
+
+    if best_delay is None or best_hits <= 0:
+        raise ValueError("Could not estimate delay from onset matches (no matches found).")
+
+    shifted = reference_onsets + best_delay
+    i = 0
+    j = 0
+    diffs: list[float] = []
+    while i < shifted.size and j < target_onsets.size:
+        dt = float(shifted[i] - target_onsets[j])
+        if abs(dt) <= match_tol_s:
+            diffs.append(float(target_onsets[j] - reference_onsets[i]))
+            i += 1
+            j += 1
+        elif dt < -match_tol_s:
+            i += 1
+        else:
+            j += 1
+
+    if len(diffs) == 0:
+        return float(best_delay)
+
+    return float(np.median(np.asarray(diffs, dtype=float)))
+
+
+def match_interval_sequences_delay_mad(
+    *,
+    reference_onsets_s: np.ndarray,
+    reference_intervals_s: np.ndarray,
+    target_onsets_s: np.ndarray,
+    target_intervals_s: np.ndarray,
+    tolerance_s: float,
+) -> float:
+    """
+    Robustly estimate delay by matching interval windows and filtering onset diffs.
+
+    Returns
+    -------
+    float
+        Delay in seconds (target minus reference).
+    """
+    reference_onsets = np.asarray(reference_onsets_s, dtype=float)
+    reference_intervals = np.asarray(reference_intervals_s, dtype=float)
+    target_onsets = np.asarray(target_onsets_s, dtype=float)
+    target_intervals = np.asarray(target_intervals_s, dtype=float)
+
+    if reference_intervals.size == 0 or target_intervals.size == 0:
+        raise ValueError("Empty trigger interval sequence; cannot estimate delay.")
+
+    max_window = 12
+    min_window = 5
+    window_len = int(min(max_window, reference_intervals.size, target_intervals.size))
+    if window_len < min_window:
+        raise ValueError(
+            "Not enough trigger intervals to match "
+            f"(reference={reference_intervals.size}, target={target_intervals.size})."
+        )
+
+    max_offset = 30
+    max_ref_start = int(min(max_offset, reference_intervals.size - window_len))
+    max_target_start = int(min(max_offset, target_intervals.size - window_len))
+
+    best_rmse = float("inf")
+    best_hits = -1
+    best_ref_start = None
+    best_target_start = None
+    best_delay = None
+
+    best_rmse_any = float("inf")
+    best_ref_start_any = None
+    best_target_start_any = None
+    best_delay_any = None
+
+    for ref_start in range(max_ref_start + 1):
+        ref_win = reference_intervals[ref_start: ref_start + window_len]
+        for target_start in range(max_target_start + 1):
+            target_win = target_intervals[target_start: target_start + window_len]
+            rmse = float(np.sqrt(np.mean((ref_win - target_win) ** 2)))
+
+            if rmse < best_rmse_any:
+                best_rmse_any = rmse
+                best_ref_start_any = ref_start
+                best_target_start_any = target_start
+                best_delay_any = float(target_onsets[target_start] - reference_onsets[ref_start])
+
+            if rmse > tolerance_s:
+                continue
+
+            delay = float(target_onsets[target_start] - reference_onsets[ref_start])
+            hits = count_onset_matches(
+                reference_onsets_s=reference_onsets,
+                target_onsets_s=target_onsets,
+                delay_s=delay,
+                match_tol_s=max(2.0 * tolerance_s, 0.01),
+            )
+
+            if (hits > best_hits) or (hits == best_hits and rmse < best_rmse):
+                best_hits = hits
+                best_rmse = rmse
+                best_ref_start = ref_start
+                best_target_start = target_start
+                best_delay = delay
+
+    if best_ref_start is None or best_target_start is None or best_delay is None:
+        if best_ref_start_any is None or best_target_start_any is None or best_delay_any is None:
+            raise ValueError("Could not find any interval alignment candidate.")
+
+        if best_rmse_any > 5.0 * tolerance_s:
+            raise ValueError(
+                "Could not find an interval alignment that also yields consistent onset alignment, "
+                f"and best available RMSE is too high (rmse={best_rmse_any:.6f}, tol={tolerance_s:.6f})."
+            )
+
+        best_ref_start = best_ref_start_any
+        best_target_start = best_target_start_any
+        best_delay = best_delay_any
+
+    ref_idx = int(best_ref_start)
+    target_idx = int(best_target_start)
+    diffs = (
+        target_onsets[target_idx: target_idx + window_len]
+        - reference_onsets[ref_idx: ref_idx + window_len]
+    )
+
+    median = float(np.median(diffs))
+    mad = float(np.median(np.abs(diffs - median)))
+    if mad == 0.0:
+        return median
+
+    modified_z = 0.6745 * (diffs - median) / mad
+    filtered = diffs[np.abs(modified_z) < 3.5]
+    if filtered.size == 0:
+        return median
+    return float(filtered.mean())
+
+
 # =============================================================================
 # Helper utilities
 # =============================================================================
