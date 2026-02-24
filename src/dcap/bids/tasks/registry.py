@@ -102,6 +102,8 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
     Note: imports are intentionally local to avoid import side effects.
     """
     from dcap.bids.tasks.diapix.task import DiapixTask
+    from dcap.bids.tasks.naming.task import NamingTask
+    from dcap.bids.tasks.sorciere.task import SorciereTask
 
     def make_diapix(ctx: TaskFactoryContext) -> BidsTask:
         dcap_id = _resolve_dcap_id(
@@ -114,19 +116,16 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
         if ctx.task_assets_dir is None:
             raise ValueError(
                 "diapix requires --task-assets-dir "
-                "(directory containing audio_onsets.tsv, stim wav, elec2atlas.mat)."
+                "(flat directory containing audio_onsets.tsv and the shared stimulus wav)."
             )
 
         task_assets_dir = Path(ctx.task_assets_dir).expanduser().resolve()
 
         audio_onsets_tsv = task_assets_dir / "audio_onsets.tsv"
         stim_wav = task_assets_dir / "beeps_pre-task-1-sec_post-task-4-sec.wav"
-        atlas_path = task_assets_dir / "elec2atlas.mat"
-
         # Optional: fail fast with helpful errors
         _require_file(audio_onsets_tsv, "audio_onsets.tsv")
         _require_file(stim_wav, "stim wav")
-        _require_file(task_assets_dir / dcap_id, "elec2atlas.mat")
 
         return DiapixTask(
             bids_subject=ctx.bids_subject,
@@ -134,11 +133,47 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
             session=ctx.session,
             audio_onsets_tsv=audio_onsets_tsv,
             stim_wav=stim_wav,
-            atlas_path=atlas_path,
+            atlas_path=None,
+        )
+
+    def make_sorciere(ctx: TaskFactoryContext) -> BidsTask:
+        dcap_id = _resolve_dcap_id(
+            dataset_id=ctx.dataset_id,
+            bids_subject=ctx.bids_subject,
+            private_root=ctx.private_root,
+            subject_map_yaml=ctx.subject_map_yaml,
+        )
+
+        if ctx.task_assets_dir is None:
+            raise ValueError(
+                "sorciere requires --task-assets-dir "
+                "(directory containing the shared Sorciere stimulus WAV)."
+            )
+
+        task_assets_dir = Path(ctx.task_assets_dir).expanduser().resolve()
+        stim_wav = _resolve_single_stim_wav(task_assets_dir, preferred_tokens=("sorciere", "ispeech", "passive"))
+
+        return SorciereTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=dcap_id,
+            session=ctx.session,
+            stim_wav=stim_wav,
+            trigger_id=10004,
+        )
+
+    def make_naming(ctx: TaskFactoryContext) -> BidsTask:
+        # Naming currently derives events from raw annotations only and does not
+        # require private subject mapping or task assets.
+        return NamingTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=None,
+            session=ctx.session,
         )
 
     return {
         "diapix": make_diapix,
+        "naming": make_naming,
+        "sorciere": make_sorciere,
         # "conversation": make_conversation,
         # "rest": make_rest,
     }
@@ -180,3 +215,30 @@ def _resolve_dcap_id(
 def _require_file(path: Path, label: str) -> None:
     if not Path(path).exists():
         raise FileNotFoundError(f"Required {label} not found: {Path(path)}")
+
+
+def _resolve_single_stim_wav(task_assets_dir: Path, preferred_tokens: tuple[str, ...]) -> Path:
+    wavs = sorted(p for p in task_assets_dir.iterdir() if p.is_file() and p.suffix.lower() == ".wav")
+    if len(wavs) == 0:
+        raise FileNotFoundError(f"No WAV stimulus file found in task assets dir: {task_assets_dir}")
+    if len(wavs) == 1:
+        return wavs[0]
+
+    scored: list[tuple[int, str, Path]] = []
+    for wav in wavs:
+        stem = wav.stem.lower()
+        rank = len(preferred_tokens) + 1
+        for idx, token in enumerate(preferred_tokens):
+            if token in stem:
+                rank = idx
+                break
+        scored.append((rank, wav.name, wav))
+
+    scored.sort(key=lambda x: (x[0], x[1]))
+    if len(scored) >= 2 and scored[0][0] == scored[1][0]:
+        names = ", ".join(w.name for w in wavs)
+        raise ValueError(
+            f"Ambiguous stimulus WAV selection in {task_assets_dir}; "
+            f"multiple candidates share the same priority: {names}"
+        )
+    return scored[0][2]

@@ -17,8 +17,11 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 from typing import Any, Optional
+import warnings
 
+from dcap.bids.core.anat import export_subject_anat_electrodes_from_elec2atlas_mat
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.converter import convert_subject
 from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
@@ -34,7 +37,7 @@ class BidsConvertCliConfig:
     Usage example
     -------------
         cfg = BidsConvertCliConfig(
-            source_root=Path("sourcedata/sub-001"),
+            source_root=Path("sourcedata"),
             bids_root=Path("bids"),
             bids_subject="sub-001",
             session=None,
@@ -52,6 +55,7 @@ class BidsConvertCliConfig:
     """
 
     source_root: Path
+    subjects_dir: Path
     bids_root: Path
     bids_subject: str
     session: Optional[str]
@@ -87,7 +91,13 @@ def add_subparser(subparsers: Any) -> None:
     )
 
     # Core inputs
-    p.add_argument("--source-root", type=Path, required=True, help="Task-discovery root (task-specific layout)")
+    p.add_argument(
+        "--source-root",
+        type=Path,
+        required=True,
+        help="Sourcedata root containing subjects/, assets_dir/, and optional stimuli/",
+    )
+    p.add_argument("--subjects-dir", type=Path, required=True, help="Anatomy/recon sourcedata root")
     p.add_argument("--bids-root", type=Path, required=True, help="BIDS output root")
 
     # BIDS-facing identity
@@ -123,7 +133,7 @@ def add_subparser(subparsers: Any) -> None:
         "--task-assets-dir",
         type=Path,
         default=None,
-        help="Optional task assets directory (task-specific auxiliary files).",
+        help="Optional task assets directory (defaults to <source-root>/assets_dir).",
     )
 
     # Safety/runtime
@@ -164,12 +174,17 @@ def run(args: argparse.Namespace) -> int:
     )
     dcap_id = entry.original_id
 
-    resolved_source_root = cfg.source_root / dcap_id
+    sourcedata_root = cfg.source_root
+    if not sourcedata_root.exists():
+        raise FileNotFoundError(f"source_root does not exist: {sourcedata_root}")
+
+    resolved_source_root = sourcedata_root / "subjects"
     if not resolved_source_root.exists():
         raise FileNotFoundError(
-            f"Resolved source_root does not exist: {resolved_source_root} "
-            f"(source_root={cfg.source_root}, dcap_id={dcap_id})"
+            f"Expected subjects/ under source_root, but not found: {resolved_source_root}"
         )
+
+    task_assets_dir = cfg.task_assets_dir if cfg.task_assets_dir is not None else (sourcedata_root / "assets_dir")
 
     core_cfg = BidsCoreConfig(
         source_root=resolved_source_root,
@@ -190,11 +205,20 @@ def run(args: argparse.Namespace) -> int:
         session=cfg.session,
         private_root=private_root,
         subject_map_yaml=cfg.subject_map_yaml,
-        task_assets_dir=cfg.task_assets_dir,
+        task_assets_dir=task_assets_dir,
     )
     task = resolve_task(task_ctx)
 
     _ = convert_subject(cfg=core_cfg, task=task)
+    if not cfg.dry_run:
+        _copy_stimuli_once(source_root=cfg.source_root, bids_root=cfg.bids_root)
+        _export_anat_electrodes_if_present(
+            bids_root=cfg.bids_root,
+            bids_subject=cfg.bids_subject,
+            subjects_dir=cfg.subjects_dir,
+            source_subject_id=dcap_id,
+            overwrite=cfg.overwrite,
+        )
     return 0
 
 
@@ -213,6 +237,7 @@ def _parse_args(args: argparse.Namespace) -> BidsConvertCliConfig:
 
     return BidsConvertCliConfig(
         source_root=Path(args.source_root).expanduser().resolve(),
+        subjects_dir=Path(args.subjects_dir).expanduser().resolve(),
         bids_root=Path(args.bids_root).expanduser().resolve(),
         bids_subject=str(args.subject).strip(),
         session=str(args.session).strip() if args.session is not None else None,
@@ -227,3 +252,32 @@ def _parse_args(args: argparse.Namespace) -> BidsConvertCliConfig:
         line_freq_hz=float(args.line_freq_hz),
         datatype=str(args.datatype).strip(),
     )
+
+
+def _copy_stimuli_once(*, source_root: Path, bids_root: Path) -> None:
+    stimuli_src = Path(source_root).resolve() / "stimuli"
+    if not stimuli_src.exists() or not stimuli_src.is_dir():
+        return
+    stimuli_dst = Path(bids_root).resolve() / "stimuli"
+    if stimuli_dst.exists():
+        return
+    shutil.copytree(stimuli_src, stimuli_dst)
+
+
+def _export_anat_electrodes_if_present(
+    *,
+    bids_root: Path,
+    bids_subject: str,
+    subjects_dir: Path,
+    source_subject_id: str,
+    overwrite: bool,
+) -> None:
+    elec2atlas_mat = Path(subjects_dir).resolve() / str(source_subject_id).strip() / "elec_recon" / "elec2atlas.mat"
+    result = export_subject_anat_electrodes_from_elec2atlas_mat(
+        bids_root=Path(bids_root).resolve(),
+        bids_subject=bids_subject,
+        elec2atlas_mat_path=elec2atlas_mat,
+        overwrite=overwrite,
+    )
+    if result is None:
+        warnings.warn(f"Anatomical electrode recon MAT not found (continuing): {elec2atlas_mat}")

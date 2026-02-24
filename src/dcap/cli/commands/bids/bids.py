@@ -13,12 +13,16 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 from typing import Any, Optional
+import warnings
 
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.converter import convert_subject
+from dcap.bids.core.anat import export_subject_anat_electrodes_from_elec2atlas_mat
 from dcap.bids.tasks.registry import TaskFactoryContext, resolve_task
 from dcap.registry.validate import resolve_private_root
+from dcap.bids.core.subject_mapping import load_subject_mapping_entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +33,7 @@ class BidsConvertCliConfig:
     Usage example
     -------------
         cfg = BidsConvertCliConfig(
-            source_root=Path("sourcedata/sub-001"),
+            source_root=Path("sourcedata"),
             bids_root=Path("bids"),
             bids_subject="sub-001",
             session=None,
@@ -47,6 +51,7 @@ class BidsConvertCliConfig:
     """
 
     source_root: Path
+    subjects_dir: Path
     bids_root: Path
     bids_subject: str
     session: Optional[str]
@@ -75,7 +80,13 @@ def _add_convert(subparsers: Any) -> None:
     p = subparsers.add_parser("convert", help="Convert sourcedata to BIDS using a selected task adapter")
 
     # Core inputs
-    p.add_argument("--source-root", type=Path, required=True, help="Task-discovery root (task-specific layout)")
+    p.add_argument(
+        "--source-root",
+        type=Path,
+        required=True,
+        help="Sourcedata root containing subjects/, assets_dir/, and optional stimuli/",
+    )
+    p.add_argument("--subjects-dir", type=Path, required=True, help="Anatomy/recon sourcedata root")
     p.add_argument("--bids-root", type=Path, required=True, help="BIDS output root")
 
     # BIDS-facing identity
@@ -110,7 +121,7 @@ def _add_convert(subparsers: Any) -> None:
         "--task-assets-dir",
         type=Path,
         default=None,
-        help="Optional task assets directory (task-specific auxiliary files).",
+        help="Optional task assets directory (defaults to <source-root>/assets_dir).",
     )
 
     # Safety/runtime
@@ -128,8 +139,18 @@ def run(args: argparse.Namespace) -> int:
 
     private_root = resolve_private_root(str(cfg.private_root_path))
 
+    sourcedata_root = cfg.source_root
+    if not sourcedata_root.exists():
+        raise FileNotFoundError(f"source_root does not exist: {sourcedata_root}")
+
+    subjects_root = sourcedata_root / "subjects"
+    if not subjects_root.exists():
+        raise FileNotFoundError(f"Expected subjects/ under source_root, but not found: {subjects_root}")
+
+    task_assets_dir = cfg.task_assets_dir if cfg.task_assets_dir is not None else (sourcedata_root / "assets_dir")
+
     core_cfg = BidsCoreConfig(
-        source_root=cfg.source_root,
+        source_root=subjects_root,
         bids_root=cfg.bids_root,
         subject=cfg.bids_subject,   # core will normalize sub- prefix etc.
         session=cfg.session,
@@ -147,11 +168,20 @@ def run(args: argparse.Namespace) -> int:
         session=cfg.session,
         private_root=private_root,
         subject_map_yaml=cfg.subject_map_yaml,
-        task_assets_dir=cfg.task_assets_dir,
+        task_assets_dir=task_assets_dir,
     )
     task = resolve_task(task_ctx)
 
     _ = convert_subject(cfg=core_cfg, task=task)
+    if not cfg.dry_run:
+        _copy_stimuli_once(source_root=cfg.source_root, bids_root=cfg.bids_root)
+        _export_anat_electrodes_if_present(
+            bids_root=cfg.bids_root,
+            bids_subject=cfg.bids_subject,
+            subjects_dir=cfg.subjects_dir,
+            source_subject_id=_resolve_source_subject_id(cfg),
+            overwrite=cfg.overwrite,
+        )
     return 0
 
 
@@ -170,6 +200,7 @@ def _parse_convert_args(args: argparse.Namespace) -> BidsConvertCliConfig:
 
     return BidsConvertCliConfig(
         source_root=Path(args.source_root).expanduser().resolve(),
+        subjects_dir=Path(args.subjects_dir).expanduser().resolve(),
         bids_root=Path(args.bids_root).expanduser().resolve(),
         bids_subject=str(args.subject).strip(),
         session=str(args.session).strip() if args.session is not None else None,
@@ -183,3 +214,56 @@ def _parse_convert_args(args: argparse.Namespace) -> BidsConvertCliConfig:
         preload_raw=bool(args.preload_raw),
         line_freq_hz=float(args.line_freq_hz),
     )
+
+
+def _copy_stimuli_once(*, source_root: Path, bids_root: Path) -> None:
+    stimuli_src = Path(source_root).resolve() / "stimuli"
+    if not stimuli_src.exists() or not stimuli_src.is_dir():
+        return
+
+    stimuli_dst = Path(bids_root).resolve() / "stimuli"
+    if stimuli_dst.exists():
+        return
+
+    shutil.copytree(stimuli_src, stimuli_dst)
+
+
+def _export_anat_electrodes_if_present(
+    *,
+    bids_root: Path,
+    bids_subject: str,
+    subjects_dir: Path,
+    source_subject_id: Optional[str],
+    overwrite: bool,
+) -> None:
+    subject_folder = str(source_subject_id).strip() if source_subject_id else str(bids_subject).strip()
+    elec2atlas_mat = Path(subjects_dir).resolve() / subject_folder / "elec_recon" / "elec2atlas.mat"
+
+    result = export_subject_anat_electrodes_from_elec2atlas_mat(
+        bids_root=Path(bids_root).resolve(),
+        bids_subject=bids_subject,
+        elec2atlas_mat_path=elec2atlas_mat,
+        overwrite=overwrite,
+    )
+    if result is None:
+        warnings.warn(f"Anatomical electrode recon MAT not found (continuing): {elec2atlas_mat}")
+
+
+def _resolve_source_subject_id(cfg: BidsConvertCliConfig) -> Optional[str]:
+    if cfg.subject_map_yaml is None and cfg.private_root_path is None:
+        return None
+    try:
+        private_root = resolve_private_root(str(cfg.private_root_path)) if cfg.private_root_path is not None else None
+        mapping_yaml = cfg.subject_map_yaml
+        if mapping_yaml is None and private_root is not None:
+            mapping_yaml = private_root / "subject_keys.yaml"
+        if mapping_yaml is None:
+            return None
+        entry = load_subject_mapping_entry(
+            mapping_yaml=mapping_yaml,
+            dataset_id=cfg.dataset_id,
+            bids_subject=cfg.bids_subject,
+        )
+        return entry.original_id
+    except Exception:
+        return None

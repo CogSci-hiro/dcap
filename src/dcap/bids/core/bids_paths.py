@@ -140,3 +140,52 @@ def build_bids_path(
         suffix=suffix,
         extension=extension,
     )
+
+
+def build_bids_file_path(
+    *,
+    bids_root: Path,
+    subject: str,
+    session: Optional[str],
+    task: Optional[str],
+    datatype: str,
+    run: Optional[str],
+    suffix: str,
+    extension: str,
+) -> Path:
+    """
+    Build a filesystem path for BIDS-like files with extensions unsupported by MNE-BIDS.
+
+    This reuses `build_bids_path()` for entity normalization and filename stem construction,
+    then swaps to the desired extension on the resulting path.
+    """
+    if not extension.startswith("."):
+        raise ValueError(f"Extension must start with '.', got {extension!r}")
+
+    # MNE-BIDS validates suffixes/extensions and rejects media labels like
+    # "audio"/"video" and extensions like ".wav"/".mp4". We use an allowed
+    # anchor path for entity normalization, then rewrite the terminal suffix.
+    anchor_suffix = suffix
+    if datatype == "beh" and suffix in {"audio", "video"}:
+        anchor_suffix = "beh"
+
+    anchor = build_bids_path(
+        bids_root=bids_root,
+        subject=subject,
+        session=session,
+        task=task,
+        datatype=datatype,
+        run=run,
+        suffix=anchor_suffix,
+        extension=".json",
+    )
+    out_path = Path(anchor.fpath)
+    if anchor_suffix != suffix:
+        stem = out_path.stem
+        token = f"_{anchor_suffix}"
+        if stem.endswith(token):
+            stem = stem[: -len(token)] + f"_{suffix}"
+            out_path = out_path.with_name(stem + out_path.suffix)
+        else:
+            raise ValueError(f"Unexpected anchor filename when rewriting suffix: {out_path.name}")
+    return out_path.with_suffix(extension)

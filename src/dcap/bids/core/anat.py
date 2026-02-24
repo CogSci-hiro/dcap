@@ -16,6 +16,7 @@
 # Imports
 # =============================================================================
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -470,6 +471,51 @@ def export_electrodes_tsv_from_elec2atlas_mat(
 
     bids_like_df.to_csv(out_path, sep="\t", index=False)
     return out_path
+
+
+def export_subject_anat_electrodes_from_elec2atlas_mat(
+    *,
+    bids_root: Path,
+    bids_subject: str,
+    elec2atlas_mat_path: Path,
+    overwrite: bool = True,
+    coords_space: str = "MNI152",
+    coords_units: str = "mm",
+) -> Optional[tuple[Path, Path]]:
+    """
+    Export subject-level `anat/` electrodes.tsv + coordsystem.json from elec2atlas.
+
+    Returns None when the MAT file is absent.
+    """
+    mat_path = Path(elec2atlas_mat_path)
+    if not mat_path.exists():
+        return None
+
+    import mat73  # type: ignore[import-not-found]
+
+    payload: Mapping[str, Any] = mat73.loadmat(mat_path)
+    electrodes_df, _ = parse_elec2atlas_payload(payload, keep_atlas_table=False)
+    bids_like_df = _extract_bids_electrodes_df(electrodes_df, coords_space=coords_space)
+
+    subject_bare = bids_subject[4:] if str(bids_subject).startswith("sub-") else str(bids_subject)
+    anat_dir = Path(bids_root) / f"sub-{subject_bare}" / "anat"
+    anat_dir.mkdir(parents=True, exist_ok=True)
+
+    electrodes_tsv = anat_dir / f"sub-{subject_bare}_electrodes.tsv"
+    coordsystem_json = anat_dir / f"sub-{subject_bare}_coordsystem.json"
+
+    if not electrodes_tsv.exists() or overwrite:
+        bids_like_df.to_csv(electrodes_tsv, sep="\t", index=False)
+
+    if not coordsystem_json.exists() or overwrite:
+        payload_json = {
+            "iEEGCoordinateSystem": coords_space,
+            "iEEGCoordinateUnits": coords_units,
+            "iEEGCoordinateSystemDescription": "Coordinates exported from elec_recon/elec2atlas.mat",
+        }
+        coordsystem_json.write_text(json.dumps(payload_json, indent=2) + "\n", encoding="utf-8")
+
+    return electrodes_tsv, coordsystem_json
 
 
 def parse_elec2atlas_payload(
