@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import Any, Final, Tuple
+from typing import Any, Final, Mapping, Optional, Tuple
+import warnings
 
 import mne
 import numpy as np
@@ -23,19 +24,23 @@ def prepare_sorciere_events(
     *,
     raw: mne.io.BaseRaw,
     stim_wav: Path,
-    trigger_id: int,
+    trigger_id: Optional[int],
     stimulus_start_delay_s: float = 0.0,
     max_fallback_offset: int = 30,
+    expected_trigger_count: int = 587,
 ) -> Tuple[PreparedEvents, dict[str, Any]]:
     """
     Create Sorciere stimulus start/end events by aligning raw triggers to the reference WAV.
     """
-    events, _ = mne.events_from_annotations(raw, verbose=False)
+    events, event_id = mne.events_from_annotations(raw, verbose=False)
     sfreq = float(raw.info["sfreq"])
 
-    trigger_events = events[events[:, 2] == int(trigger_id)]
-    if trigger_events.size == 0:
-        raise ValueError(f"No triggers found for trigger_id={trigger_id}.")
+    trigger_events, selected_trigger_id, selection_info = _select_trigger_events(
+        events=events,
+        event_id=event_id,
+        preferred_trigger_id=trigger_id,
+        expected_trigger_count=expected_trigger_count,
+    )
 
     delay_s, wav_onsets_s, raw_onsets_s, stim_duration_s = _compute_delay_seconds_and_duration(
         raw_trigger_events=trigger_events,
@@ -70,8 +75,89 @@ def prepare_sorciere_events(
         "stimulus_end_sample_planned": int(planned_end_sample),
         "stimulus_end_sample_actual": int(end_sample),
         "stimulus_window_is_full": bool(end_sample == planned_end_sample),
+        "trigger_id_selected": int(selected_trigger_id),
+        "trigger_selection": selection_info,
     }
     return prepared, alignment
+
+
+def _select_trigger_events(
+    *,
+    events: np.ndarray,
+    event_id: Mapping[Any, int],
+    preferred_trigger_id: Optional[int],
+    expected_trigger_count: int,
+) -> tuple[np.ndarray, int, dict[str, Any]]:
+    counts: dict[int, int] = {}
+    for code in events[:, 2]:
+        code_int = int(code)
+        counts[code_int] = counts.get(code_int, 0) + 1
+
+    selected: Optional[int] = None
+    selection_mode = "unknown"
+
+    if preferred_trigger_id is not None:
+        preferred = int(preferred_trigger_id)
+        preferred_events = events[events[:, 2] == preferred]
+        if preferred_events.shape[0] >= 2:
+            selected = preferred
+            selection_mode = "configured"
+        else:
+            warnings.warn(
+                f"Sorciere configured trigger_id={preferred} has only {preferred_events.shape[0]} events; "
+                "falling back to auto detection."
+            )
+
+    if selected is None:
+        label_by_code = {int(v): str(k) for k, v in event_id.items()}
+        stimulus_codes = [
+            code for code, label in label_by_code.items()
+            if label.startswith("Stimulus/")
+        ]
+        candidate_codes = stimulus_codes if len(stimulus_codes) > 0 else sorted(counts.keys())
+        candidate_codes = [code for code in candidate_codes if counts.get(code, 0) >= 2]
+
+        if len(candidate_codes) == 0:
+            if preferred_trigger_id is not None:
+                raise ValueError(
+                    f"No usable trigger train found. Configured trigger_id={preferred_trigger_id} did not have >=2 events."
+                )
+            raise ValueError("No usable trigger train found from annotations (need at least 2 repeated events).")
+
+        selected = max(candidate_codes, key=lambda code: (counts.get(code, 0), code))
+        selection_mode = "auto_most_frequent"
+        _warn_if_trigger_count_is_unexpected(
+            trigger_id=selected,
+            trigger_count=counts[selected],
+            expected_trigger_count=expected_trigger_count,
+        )
+
+    trigger_events = events[events[:, 2] == int(selected)]
+    if trigger_events.shape[0] < 2:
+        raise ValueError(
+            f"Selected trigger_id={selected} has {trigger_events.shape[0]} events; at least 2 are required."
+        )
+
+    return trigger_events, int(selected), {
+        "mode": selection_mode,
+        "preferred_trigger_id": None if preferred_trigger_id is None else int(preferred_trigger_id),
+        "selected_trigger_id": int(selected),
+        "selected_count": int(trigger_events.shape[0]),
+        "counts_by_code": {int(k): int(v) for k, v in sorted(counts.items())},
+    }
+
+
+def _warn_if_trigger_count_is_unexpected(*, trigger_id: int, trigger_count: int, expected_trigger_count: int) -> None:
+    if expected_trigger_count <= 0:
+        return
+    lower = int(round(expected_trigger_count * 0.5))
+    upper = int(round(expected_trigger_count * 1.5))
+    if lower <= trigger_count <= upper:
+        return
+    warnings.warn(
+        f"Sorciere auto-detected trigger_id={trigger_id} with {trigger_count} events; "
+        f"this is far from expected ~{expected_trigger_count}."
+    )
 
 
 def _compute_delay_seconds_and_duration(
@@ -133,4 +219,3 @@ def _get_wav_trigger_onsets_and_intervals(
 
     # Keep onset/interval lengths aligned for delay matching.
     return onsets_s[:-1], intervals_s, stim_duration_s
-

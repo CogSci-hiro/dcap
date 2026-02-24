@@ -66,6 +66,7 @@ class BidsConvertCliConfig:
     private_root_path: Optional[Path]
     subject_map_yaml: Optional[Path]
     task_assets_dir: Optional[Path]
+    task_trigger_id: Optional[int]
 
     overwrite: bool
     dry_run: bool
@@ -134,6 +135,12 @@ def add_subparser(subparsers: Any) -> None:
         type=Path,
         default=None,
         help="Optional task assets directory (defaults to <source-root>/assets_dir).",
+    )
+    p.add_argument(
+        "--task-trigger-id",
+        type=int,
+        default=None,
+        help="Optional task-specific trigger code override (currently used by sorciere).",
     )
 
     # Safety/runtime
@@ -206,6 +213,7 @@ def run(args: argparse.Namespace) -> int:
         private_root=private_root,
         subject_map_yaml=cfg.subject_map_yaml,
         task_assets_dir=task_assets_dir,
+        task_trigger_id=cfg.task_trigger_id,
     )
     task = resolve_task(task_ctx)
 
@@ -246,6 +254,7 @@ def _parse_args(args: argparse.Namespace) -> BidsConvertCliConfig:
         private_root_path=private_root,
         subject_map_yaml=Path(args.subject_map_yaml).expanduser().resolve() if args.subject_map_yaml is not None else None,
         task_assets_dir=Path(args.task_assets_dir).expanduser().resolve() if args.task_assets_dir is not None else None,
+        task_trigger_id=int(args.task_trigger_id) if args.task_trigger_id is not None else None,
         overwrite=bool(args.overwrite),
         dry_run=bool(args.dry_run),
         preload_raw=bool(args.preload_raw),

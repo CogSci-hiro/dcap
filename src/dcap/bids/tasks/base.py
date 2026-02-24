@@ -91,6 +91,7 @@ def discover_recording_units_from_task_layout(
     bids_subject: str,
     task_name: str,
     source_subject_id: Optional[str] = None,
+    allow_single_raw_at_task_root_if_no_runs: bool = False,
 ) -> list[RecordingUnit]:
     """
     Discover runs from sourcedata/subjects/<source-subject>/task-YYY/run-ZZ layout.
@@ -105,6 +106,19 @@ def discover_recording_units_from_task_layout(
     source_subject_dir_name = _normalize_source_subject_dir_name(source_subject_id, fallback_bids_subject=subject_label)
     subject_dir = source_root / source_subject_dir_name
     task_dir = subject_dir / _normalize_task_dir_name(task_label)
+
+    if allow_single_raw_at_task_root_if_no_runs:
+        run_dirs = sorted(
+            p for p in task_dir.iterdir()
+            if p.is_dir() and p.name.startswith("run-")
+        ) if task_dir.exists() and task_dir.is_dir() else []
+        if len(run_dirs) == 0:
+            return _discover_single_task_root_unit(
+                task_dir=task_dir,
+                bids_subject=subject_label,
+                task_name=task_label,
+            )
+
     run_dirs = _validate_task_layout(task_dir=task_dir, subject=subject_label, task=task_label)
 
     units: list[RecordingUnit] = []
@@ -133,6 +147,41 @@ def discover_recording_units_from_task_layout(
         )
 
     return units
+
+
+def _discover_single_task_root_unit(
+    *,
+    task_dir: Path,
+    bids_subject: str,
+    task_name: str,
+) -> list[RecordingUnit]:
+    if not task_dir.exists():
+        raise FileNotFoundError(
+            f"Task folder not found for subject={bids_subject!r}, task={task_name!r}: {task_dir}"
+        )
+    if not task_dir.is_dir():
+        raise NotADirectoryError(f"Task path is not a directory: {task_dir}")
+
+    eeg_path = _select_exactly_one_eeg(task_dir, subject=bids_subject, task=task_name)
+    audio_candidates = _discover_audio_candidates(task_dir, exclude={eeg_path})
+    video_candidates = _discover_video_candidates(task_dir, exclude={eeg_path})
+    annotation_candidates = _discover_annotation_candidates(
+        task_dir,
+        exclude={eeg_path, *audio_candidates, *video_candidates},
+    )
+
+    return [
+        RecordingUnit(
+            subject=_normalize_subject_dir_name(bids_subject),
+            task=task_name,
+            run="01",
+            eeg_path=eeg_path,
+            audio_path=_select_optional_single(audio_candidates, kind="audio", run_dir=task_dir),
+            video_path=_select_optional_single(video_candidates, kind="video", run_dir=task_dir),
+            annotation_path=_select_optional_single(annotation_candidates, kind="annotation", run_dir=task_dir),
+            run_dir=task_dir,
+        )
+    ]
 
 
 def _normalize_subject_dir_name(subject: str) -> str:

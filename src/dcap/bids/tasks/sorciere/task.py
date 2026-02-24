@@ -33,14 +33,14 @@ class SorciereTask(BidsTask):
         dcap_id: str,
         session: Optional[str],
         stim_wav: Path,
-        trigger_id: int = 10004,
+        trigger_id: Optional[int] = None,
         timing: Optional[SorciereTiming] = None,
     ) -> None:
         self._bids_subject = str(bids_subject).strip()
         self._dcap_id = str(dcap_id).strip()
         self._session = session
         self._stim_wav = Path(stim_wav).expanduser().resolve()
-        self._trigger_id = int(trigger_id)
+        self._trigger_id = None if trigger_id is None else int(trigger_id)
         self._timing = timing if timing is not None else SorciereTiming()
 
         self._alignment_cache: dict[str, dict[str, Any]] = {}
@@ -52,6 +52,7 @@ class SorciereTask(BidsTask):
             bids_subject=self._bids_subject,
             task_name=self.name,
             source_subject_id=self._dcap_id,
+            allow_single_raw_at_task_root_if_no_runs=True,
         )
 
     def load_raw(self, unit: RecordingUnit, preload: bool) -> mne.io.BaseRaw:

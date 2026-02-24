@@ -53,6 +53,7 @@ class TaskFactoryContext:
     private_root: Optional[Path]
     subject_map_yaml: Optional[Path]
     task_assets_dir: Optional[Path]
+    task_trigger_id: Optional[int] = None
 
 
 TaskFactory = Callable[[TaskFactoryContext], BidsTask]
@@ -158,7 +159,7 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
             dcap_id=dcap_id,
             session=ctx.session,
             stim_wav=stim_wav,
-            trigger_id=10004,
+            trigger_id=ctx.task_trigger_id,
         )
 
     def make_naming(ctx: TaskFactoryContext) -> BidsTask:
@@ -218,7 +219,10 @@ def _require_file(path: Path, label: str) -> None:
 
 
 def _resolve_single_stim_wav(task_assets_dir: Path, preferred_tokens: tuple[str, ...]) -> Path:
-    wavs = sorted(p for p in task_assets_dir.iterdir() if p.is_file() and p.suffix.lower() == ".wav")
+    wavs = sorted(
+        p for p in task_assets_dir.iterdir()
+        if p.is_file() and not _is_hidden_sidecar(p) and p.suffix.lower() == ".wav"
+    )
     if len(wavs) == 0:
         raise FileNotFoundError(f"No WAV stimulus file found in task assets dir: {task_assets_dir}")
     if len(wavs) == 1:
@@ -242,3 +246,8 @@ def _resolve_single_stim_wav(task_assets_dir: Path, preferred_tokens: tuple[str,
             f"multiple candidates share the same priority: {names}"
         )
     return scored[0][2]
+
+
+def _is_hidden_sidecar(path: Path) -> bool:
+    name = path.name
+    return name.startswith("._") or (name.startswith(".") and name not in {".", ".."})
