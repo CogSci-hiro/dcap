@@ -175,7 +175,7 @@ def split_textgrid(
     tg = textgrid.openTextgrid(str(merged_textgrid_path), includeEmptyIntervals=True)
 
     for seg in segments:
-        seg_tg = textgrid.Textgrid(minT=0.0, maxT=seg.duration_s)
+        seg_tg = textgrid.Textgrid(minTimestamp=0.0, maxTimestamp=seg.duration_s)
 
         for tier_name in tg.tierNames:
             tier = tg.getTier(tier_name)
