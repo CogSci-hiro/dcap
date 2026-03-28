@@ -102,6 +102,7 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
     Note: imports are intentionally local to avoid import side effects.
     """
     from dcap.bids.tasks.diapix.task import DiapixTask
+    from dcap.bids.tasks.naming.task import NamingTask
 
     def make_diapix(ctx: TaskFactoryContext) -> BidsTask:
         dcap_id = _resolve_dcap_id(
@@ -137,8 +138,36 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
             atlas_path=atlas_path,
         )
 
+    def make_naming(ctx: TaskFactoryContext) -> BidsTask:
+        dcap_id = _resolve_dcap_id(
+            dataset_id=ctx.dataset_id,
+            bids_subject=ctx.bids_subject,
+            private_root=ctx.private_root,
+            subject_map_yaml=ctx.subject_map_yaml,
+        )
+
+        if ctx.task_assets_dir is None:
+            raise ValueError(
+                "naming requires --task-assets-dir "
+                "(Presentation task directory containing sequences/ and stimuli/)."
+            )
+
+        presentation_root = Path(ctx.task_assets_dir).expanduser().resolve()
+        if not (presentation_root / "sequences").exists():
+            raise FileNotFoundError(
+                f"naming task assets directory must contain a sequences/ folder: {presentation_root}"
+            )
+
+        return NamingTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=dcap_id,
+            session=ctx.session,
+            presentation_root=presentation_root,
+        )
+
     return {
         "diapix": make_diapix,
+        "naming": make_naming,
         # "conversation": make_conversation,
         # "rest": make_rest,
     }
