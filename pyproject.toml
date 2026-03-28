@@ -18,6 +18,8 @@ dependencies = [
   "pandas>=2.0",
   "praat-parselmouth",
   "pydab",
+  "pydub",
+  "audioop-lts",
   "PyQt5",
   "pytest",
   "pyvistaqt",
