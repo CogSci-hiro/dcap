@@ -340,8 +340,10 @@ def _discover_run_ids_from_bids(
     patterns = [
         f"{subject_id}*task-{task}*run-*.tsv",
         f"{subject_id}*task-{task}*run-*.edf",
+        f"{subject_id}*task-{task}*run-*.bdf",
         f"{subject_id}*task-{task}*run-*.vhdr",
         f"{subject_id}*task-{task}*run-*.set",
+        f"{subject_id}*task-{task}*run-*.fif",
     ]
 
     for d in candidate_dirs:
@@ -363,4 +365,3 @@ def _discover_run_ids_from_bids(
                 run_ids.add(run_part)
 
     return sorted(run_ids)
-

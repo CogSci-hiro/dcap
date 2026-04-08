@@ -12,7 +12,7 @@ selection:
   # Used when scope is "run" or "patient"
   subject: "027"               # without "sub-"
   session: null                # without "ses-" (null if none)
-  task: "conversation"         # optional
+  task: "conversation"         # optional; e.g. "conversation" or "iphoneme"
   run: "1"                     # required if scope="run"
 
   # Used when scope is "dataset" (optional if you just traverse bids_root)
@@ -22,7 +22,7 @@ selection:
   include:
     subjects: null             # e.g. ["001", "002"] or null
     sessions: null             # e.g. ["01"] or null
-    tasks: null                # e.g. ["conversation"] or null
+    tasks: null                # e.g. ["conversation", "iphoneme"] or null
     runs: null                 # e.g. ["1", "2"] or null
   exclude:
     subjects: null

@@ -209,6 +209,35 @@ def build_default_seeg_channel_types(
     return mapping
 
 
+def build_default_channel_types(
+    *,
+    channel_names: Sequence[str],
+    datatype: str,
+    ecg_channel_name: str = "ECG",
+) -> Dict[str, str]:
+    """
+    Build a conservative default channel-type mapping for the requested datatype.
+
+    Supported defaults are intentionally narrow:
+    - ``ieeg`` -> all non-ECG channels become ``seeg``
+    - ``eeg`` -> all non-ECG channels become ``eeg``
+
+    Other datatypes currently fall back to the existing iEEG-safe behavior so we
+    do not silently broaden policy beyond what this repo already supports.
+    """
+    datatype_norm = str(datatype).strip().lower()
+    if datatype_norm == "eeg":
+        mapping: Dict[str, str] = {str(ch): "eeg" for ch in channel_names}
+        if ecg_channel_name in mapping:
+            mapping[ecg_channel_name] = "ecg"
+        return mapping
+
+    return build_default_seeg_channel_types(
+        channel_names=channel_names,
+        ecg_channel_name=ecg_channel_name,
+    )
+
+
 # =============================================================================
 # Channel selection helpers (safe, task-agnostic)
 # =============================================================================

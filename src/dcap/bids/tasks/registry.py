@@ -102,7 +102,9 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
     Note: imports are intentionally local to avoid import side effects.
     """
     from dcap.bids.tasks.diapix.task import DiapixTask
+    from dcap.bids.tasks.iphoneme.task import IphonemeTask
     from dcap.bids.tasks.naming.task import NamingTask
+    from dcap.bids.tasks.sorciere.task import SorciereTask
 
     def make_diapix(ctx: TaskFactoryContext) -> BidsTask:
         dcap_id = _resolve_dcap_id(
@@ -165,9 +167,51 @@ def _get_task_factories() -> Mapping[str, TaskFactory]:
             presentation_root=presentation_root,
         )
 
+    def make_sorciere(ctx: TaskFactoryContext) -> BidsTask:
+        dcap_id = _resolve_dcap_id(
+            dataset_id=ctx.dataset_id,
+            bids_subject=ctx.bids_subject,
+            private_root=ctx.private_root,
+            subject_map_yaml=ctx.subject_map_yaml,
+        )
+
+        if ctx.task_assets_dir is None:
+            raise ValueError(
+                "sorciere requires --task-assets-dir "
+                "(directory containing sorciere.mp3)."
+            )
+
+        task_assets_dir = Path(ctx.task_assets_dir).expanduser().resolve()
+        reference_audio_path = task_assets_dir / "sorciere.mp3" if task_assets_dir.is_dir() else task_assets_dir
+        _require_file(reference_audio_path, "Sorciere reference audio")
+
+        return SorciereTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=dcap_id,
+            session=ctx.session,
+            reference_audio_path=reference_audio_path,
+            annotation_origin_in_reference_s=3.0,
+        )
+
+    def make_iphoneme(ctx: TaskFactoryContext) -> BidsTask:
+        dcap_id = _resolve_dcap_id(
+            dataset_id=ctx.dataset_id,
+            bids_subject=ctx.bids_subject,
+            private_root=ctx.private_root,
+            subject_map_yaml=ctx.subject_map_yaml,
+        )
+
+        return IphonemeTask(
+            bids_subject=ctx.bids_subject,
+            dcap_id=dcap_id,
+            session=ctx.session,
+        )
+
     return {
         "diapix": make_diapix,
+        "iphoneme": make_iphoneme,
         "naming": make_naming,
+        "sorciere": make_sorciere,
         # "conversation": make_conversation,
         # "rest": make_rest,
     }

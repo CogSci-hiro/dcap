@@ -27,7 +27,7 @@ from dcap.bids.core.bids_paths import build_bids_path, normalize_bids_label
 from dcap.bids.core.config import BidsCoreConfig
 from dcap.bids.core.transforms import apply_line_frequency
 from dcap.bids.tasks.base import BidsTask, PreparedEvents, RecordingUnit
-from dcap.bids.core.transforms import apply_channel_types, build_default_seeg_channel_types
+from dcap.bids.core.transforms import apply_channel_types, build_default_channel_types
 
 
 # =============================================================================
@@ -126,8 +126,9 @@ def convert_subject(
         wrote_files = False
 
         # Set channel types
-        channel_type_mapping = build_default_seeg_channel_types(
+        channel_type_mapping = build_default_channel_types(
             channel_names=raw.ch_names,
+            datatype=cfg.datatype,
             ecg_channel_name="ECG",
         )
         apply_channel_types(raw, channel_type_mapping)
@@ -146,7 +147,8 @@ def convert_subject(
             )
             wrote_files = True
 
-        task.post_write(unit=unit, bids_path=bids_path)
+        if wrote_files:
+            task.post_write(unit=unit, bids_path=bids_path)
 
         results.append(ConvertedItem(unit=unit, bids_path=bids_path, wrote_files=wrote_files))
 

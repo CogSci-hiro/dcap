@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import mne
 import pandas as pd
 
+from dcap.seeg.io.sidecars import find_neighbor_sidecar
 from dcap.seeg.preprocessing.configs.bad_channels import BadChannelsConfig
 from dcap.seeg.preprocessing.types import BadChannelReason, BlockArtifact, PreprocContext
 
@@ -42,26 +43,7 @@ def _infer_bids_channels_tsv(raw: mne.io.BaseRaw) -> Optional[Path]:
         return None
 
     data_path = Path(raw.filenames[0])
-
-    # BrainVision often yields .vhdr; EDF/FIF yield their own suffix.
-    # BIDS channels sidecar uses the "stem" (no suffix) + "_channels.tsv".
-    candidate = data_path.parent / f"{data_path.stem}_channels.tsv"
-    if candidate.exists():
-        return candidate
-
-    # Some loaders might give a different "primary" filename; try a more robust fallback:
-    # strip *all* suffixes (e.g., ".nii.gz" style) then append "_channels.tsv".
-    base = data_path.name
-    while True:
-        p = Path(base)
-        if p.suffix == "":
-            break
-        base = p.stem
-    candidate2 = data_path.parent / f"{base}_channels.tsv"
-    if candidate2.exists():
-        return candidate2
-
-    return None
+    return find_neighbor_sidecar(data_path, sidecar_suffix="_channels.tsv")
 
 
 def _read_bad_channels_from_bids_tsv(channels_tsv: Path) -> Tuple[List[str], Dict[str, str]]:

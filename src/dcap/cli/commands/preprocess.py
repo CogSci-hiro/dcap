@@ -75,6 +75,7 @@ class RunSpec:
     task: Optional[str]
     run: Optional[str]
     in_path: Path
+    datatype: str = "ieeg"
 
     def base_stem(self) -> str:
         """
@@ -176,8 +177,8 @@ def _iter_runs_from_cfg(cfg: StandardPipelineConfig) -> Iterator[RunSpec]:
     ----------------------
     Uses simple filesystem globbing for iEEG sources:
 
-    - Looks under <bids_root>/sub-*/(ses-*/)?ieeg/
-    - Accepts: *.edf, *.fif
+    - Looks under <bids_root>/sub-*/(ses-*/)?{ieeg,eeg}/
+    - Accepts: *.edf, *.bdf, *.vhdr, *.set, *.fif
     - Extracts task/run from filename tokens if present
 
     Replaceable
@@ -230,33 +231,30 @@ def _iter_runs_from_cfg(cfg: StandardPipelineConfig) -> Iterator[RunSpec]:
         for ses_dir in ses_dirs:
             ses = None if ses_dir == sub_dir else ses_dir.name.replace("ses-", "")
 
-            ieeg_dir = ses_dir / "ieeg"
-            if not ieeg_dir.exists():
-                continue
-
-            for in_path in sorted(list(ieeg_dir.glob("*.edf")) + list(ieeg_dir.glob("*.fif"))):
-                if not in_path.is_file():
+            for datatype in ("ieeg", "eeg"):
+                data_dir = ses_dir / datatype
+                if not data_dir.exists():
                     continue
 
-                parsed_task, parsed_run = _parse_task_run_from_name(in_path.name)
+                for in_path in _iter_recording_paths(data_dir):
+                    parsed_task, parsed_run = _parse_task_run_from_name(in_path.name)
 
-                # Apply task/run filters
-                if tasks is not None and parsed_task is not None and parsed_task not in tasks:
-                    continue
-                if runs is not None and parsed_run is not None and parsed_run not in runs:
-                    continue
+                    if tasks is not None and parsed_task is not None and parsed_task not in tasks:
+                        continue
+                    if runs is not None and parsed_run is not None and parsed_run not in runs:
+                        continue
 
-                # Exclude filters
-                if _is_excluded(subj, ses, parsed_task, parsed_run, exclude=exclude):
-                    continue
+                    if _is_excluded(subj, ses, parsed_task, parsed_run, exclude=exclude):
+                        continue
 
-                yield RunSpec(
-                    subject=subj,
-                    session=ses,
-                    task=parsed_task,
-                    run=parsed_run,
-                    in_path=in_path,
-                )
+                    yield RunSpec(
+                        subject=subj,
+                        session=ses,
+                        task=parsed_task,
+                        run=parsed_run,
+                        in_path=in_path,
+                        datatype=datatype,
+                    )
 
 
 def _normalize_optional_str_list(value: object) -> Optional[List[str]]:
@@ -265,6 +263,17 @@ def _normalize_optional_str_list(value: object) -> Optional[List[str]]:
     if isinstance(value, list):
         return [str(v) for v in value]
     return [str(value)]
+
+
+def _iter_recording_paths(data_dir: Path) -> Iterator[Path]:
+    patterns = ("*.edf", "*.bdf", "*.vhdr", "*.set", "*.fif")
+    candidates: List[Path] = []
+    for pattern in patterns:
+        candidates.extend(data_dir.glob(pattern))
+
+    for in_path in sorted(candidates):
+        if in_path.is_file():
+            yield in_path
 
 
 def _parse_task_run_from_name(filename: str) -> Tuple[Optional[str], Optional[str]]:
@@ -317,11 +326,17 @@ def _is_excluded(
 # =============================================================================
 def _read_raw(path: Path, *, preload: bool, verbose: bool) -> mne.io.BaseRaw:
     """
-    Read EDF or FIF with MNE.
+    Read common BIDS EEG/iEEG formats with MNE.
     """
     suffix = path.suffix.lower()
     if suffix == ".edf":
         return mne.io.read_raw_edf(path, preload=preload, verbose="info" if verbose else False)
+    if suffix == ".bdf":
+        return mne.io.read_raw_bdf(path, preload=preload, verbose="info" if verbose else False)
+    if suffix == ".vhdr":
+        return mne.io.read_raw_brainvision(path, preload=preload, verbose="info" if verbose else False)
+    if suffix == ".set":
+        return mne.io.read_raw_eeglab(path, preload=preload, verbose="info" if verbose else False)
     if suffix == ".fif":
         return mne.io.read_raw_fif(path, preload=preload, verbose="info" if verbose else False)
     raise ValueError(f"Unsupported input file type: {path.name}")
@@ -339,7 +354,7 @@ def _resolve_out_dir(*, cfg: StandardPipelineConfig, run_spec: RunSpec) -> Path:
     out_dir = root / derivatives_name / f"sub-{run_spec.subject}"
     if run_spec.session is not None:
         out_dir = out_dir / f"ses-{run_spec.session}"
-    out_dir = out_dir / "ieeg"
+    out_dir = out_dir / run_spec.datatype
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 

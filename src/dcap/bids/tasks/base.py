@@ -4,11 +4,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Protocol, Sequence
+from typing import TYPE_CHECKING, Optional, Protocol, Sequence
 
 import mne
 import numpy as np
-from mne_bids import BIDSPath
+
+if TYPE_CHECKING:  # pragma: no cover
+    from mne_bids import BIDSPath
 
 
 @dataclass(frozen=True)
@@ -59,8 +61,8 @@ class BidsTask(Protocol):
     def load_raw(self, unit: RecordingUnit, preload: bool) -> mne.io.BaseRaw:
         ...
 
-    def prepare_events(self, raw: mne.io.BaseRaw, unit: RecordingUnit, bids_path: BIDSPath) -> PreparedEvents:
+    def prepare_events(self, raw: mne.io.BaseRaw, unit: RecordingUnit, bids_path: "BIDSPath") -> PreparedEvents:
         ...
 
-    def post_write(self, unit: RecordingUnit, bids_path: BIDSPath) -> None:
+    def post_write(self, unit: RecordingUnit, bids_path: "BIDSPath") -> None:
         ...
