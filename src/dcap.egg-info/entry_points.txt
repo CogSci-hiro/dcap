@@ -1,0 +1,2 @@
+[console_scripts]
+dcap = dcap.cli.main:main

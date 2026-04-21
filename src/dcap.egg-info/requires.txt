@@ -1,0 +1,17 @@
+mat73
+meegkit
+mne>=1.6
+mne-bids>=0.15
+nibabel
+numpy>=1.24
+pandas>=2.0
+praat-parselmouth
+pydab
+PyQt5
+pytest
+pyvistaqt
+ipywidgets
+praatio
+pyyaml
+soundfile
+typer

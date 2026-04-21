@@ -1,0 +1,46 @@
+Metadata-Version: 2.4
+Name: dcap
+Version: 0.1.0
+Summary: Reusable tooling for clinically acquired sEEG datasets: BIDS, QC, preprocessing, registry.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: mat73
+Requires-Dist: meegkit
+Requires-Dist: mne>=1.6
+Requires-Dist: mne-bids>=0.15
+Requires-Dist: nibabel
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=2.0
+Requires-Dist: praat-parselmouth
+Requires-Dist: pydab
+Requires-Dist: PyQt5
+Requires-Dist: pytest
+Requires-Dist: pyvistaqt
+Requires-Dist: ipywidgets
+Requires-Dist: praatio
+Requires-Dist: pyyaml
+Requires-Dist: soundfile
+Requires-Dist: typer
+
+# dcap
+
+Internal skeleton repo. README to be written later.
+
+
+    cli/
+      __init__.py
+      main.py                 # single entry point for `dcap`
+      commands/
+        bids_convert.py         # subcommand module: add_subparser() + run()
+
+    bids/
+      __init__.py
+      config.py               # dataclasses for BIDS conversion config
+      converter.py            # orchestration: discover -> load -> transform -> write
+      heuristics.py           # source discovery + parsing rules
+      io.py                   # raw/audio loading + small file fixes
+      transforms.py           # channel mapping/types/montage
+      events.py               # events creation (optional)
+      sidecars.py             # JSON/TSV sidecars (optional)
+      anat.py                 # write_anat + derivatives copying (optional)
+      _resources.py    
