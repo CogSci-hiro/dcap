@@ -2,3 +2,5 @@
 .dcap_private
 dev
 data/_dcap_private
+project_snapshot.md
+project_info.py
